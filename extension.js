@@ -247,12 +247,11 @@ function getColor(settings, key) {
     return COLOR_PATTERN.test(value) ? value : null;
 }
 
-function span(text, color) {
-    return color ? `<span foreground="${color}">${text}</span>` : text;
-}
-
-function metricMarkup(title, value, titleColor, valueColor) {
-    return `${span(title, titleColor)} ${span(value, valueColor)}`;
+function setLabelColor(label, color) {
+    // Inline St.Widget CSS overrides the panel theme for this label only.
+    // Keeping title and value as separate actors avoids Pango-markup/theme
+    // interactions and makes every configured color independent.
+    label.set_style(color ? `color: ${color};` : '');
 }
 
 export default class TinyResourceMonitorExtension extends Extension {
@@ -297,13 +296,57 @@ export default class TinyResourceMonitorExtension extends Extension {
         );
     }
 
-    _buildIndicator() {
-        this._indicator = new PanelMenu.Button(0.0, this.metadata.name, true);
-        this._label = new St.Label({
-            text: 'CPU -- | RAM --',
+    _createMetricActor(title) {
+        const box = new St.BoxLayout({
             y_align: Clutter.ActorAlign.CENTER,
         });
-        this._indicator.add_child(this._label);
+        const titleLabel = new St.Label({
+            text: title,
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        const spacer = new St.Label({
+            text: ' ',
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        const valueLabel = new St.Label({
+            text: '--',
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+
+        box.add_child(titleLabel);
+        box.add_child(spacer);
+        box.add_child(valueLabel);
+
+        return {box, titleLabel, valueLabel};
+    }
+
+    _buildIndicator() {
+        this._indicator = new PanelMenu.Button(0.0, this.metadata.name, true);
+        this._contentBox = new St.BoxLayout({
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        this._indicator.add_child(this._contentBox);
+
+        this._metrics = {
+            cpu: this._createMetricActor('CPU'),
+            ram: this._createMetricActor('RAM'),
+            download: this._createMetricActor('↓'),
+            upload: this._createMetricActor('↑'),
+        };
+        this._separators = Array.from({length: 3}, () => new St.Label({
+            text: ' | ',
+            y_align: Clutter.ActorAlign.CENTER,
+        }));
+        this._emptyLabel = new St.Label({
+            text: '⋯',
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+
+        for (const item of DISPLAY_ITEMS)
+            this._contentBox.add_child(this._metrics[item].box);
+        for (const separator of this._separators)
+            this._contentBox.add_child(separator);
+        this._contentBox.add_child(this._emptyLabel);
 
         // Right click always opens the same native preferences window.
         this._indicator.connect('button-press-event', (_actor, event) => {
@@ -325,12 +368,55 @@ export default class TinyResourceMonitorExtension extends Extension {
     _rebuildIndicator() {
         this._indicator?.destroy();
         this._indicator = null;
-        this._label = null;
+        this._contentBox = null;
+        this._metrics = null;
+        this._separators = null;
+        this._emptyLabel = null;
         this._buildIndicator();
     }
 
+    _renderMetrics(values, colors, visibleItems) {
+        const metricColors = {
+            cpu: [colors.cpuTitle, colors.cpuValue],
+            ram: [colors.ramTitle, colors.ramValue],
+            download: [colors.downloadTitle, colors.downloadValue],
+            upload: [colors.uploadTitle, colors.uploadValue],
+        };
+
+        for (const item of DISPLAY_ITEMS) {
+            const metric = this._metrics[item];
+            metric.valueLabel.text = values[item];
+            setLabelColor(metric.titleLabel, metricColors[item][0]);
+            setLabelColor(metric.valueLabel, metricColors[item][1]);
+            metric.box.hide();
+        }
+
+        for (const separator of this._separators)
+            separator.hide();
+        this._emptyLabel.hide();
+
+        if (visibleItems.length === 0) {
+            this._contentBox.set_child_at_index(this._emptyLabel, 0);
+            this._emptyLabel.show();
+            return;
+        }
+
+        let childIndex = 0;
+        visibleItems.forEach((item, index) => {
+            const metric = this._metrics[item];
+            this._contentBox.set_child_at_index(metric.box, childIndex++);
+            metric.box.show();
+
+            if (index < visibleItems.length - 1) {
+                const separator = this._separators[index];
+                this._contentBox.set_child_at_index(separator, childIndex++);
+                separator.show();
+            }
+        });
+    }
+
     _update() {
-        if (!this._label || !this._settings)
+        if (!this._contentBox || !this._metrics || !this._settings)
             return;
 
         try {
@@ -403,33 +489,33 @@ export default class TinyResourceMonitorExtension extends Extension {
                 uploadValue: getColor(this._settings, 'upload-value-color'),
             };
 
-            const items = {
-                cpu: showCpu
-                    ? metricMarkup('CPU', cpuText, colors.cpuTitle, colors.cpuValue)
-                    : null,
-                ram: showRam
-                    ? metricMarkup('RAM', ramText, colors.ramTitle, colors.ramValue)
-                    : null,
-                download: networkNeeded && iface && showDownload
-                    ? metricMarkup('↓', formatRate(rxRate), colors.downloadTitle, colors.downloadValue)
-                    : null,
-                upload: networkNeeded && iface && showUpload
-                    ? metricMarkup('↑', formatRate(txRate), colors.uploadTitle, colors.uploadValue)
-                    : null,
+            const values = {
+                cpu: cpuText,
+                ram: ramText,
+                download: formatRate(rxRate),
+                upload: formatRate(txRate),
             };
+            const isVisible = {
+                cpu: showCpu,
+                ram: showRam,
+                download: networkNeeded && Boolean(iface) && showDownload,
+                upload: networkNeeded && Boolean(iface) && showUpload,
+            };
+            const visibleItems = getDisplayOrder(this._settings)
+                .filter(item => isVisible[item]);
 
-            const parts = [];
-            for (const item of getDisplayOrder(this._settings)) {
-                if (items[item])
-                    parts.push(items[item]);
-            }
-
-            // Keep a tiny right-click target if the user hides every item.
-            // It contains no resource data and prevents locking the user out of prefs.
-            this._label.clutter_text.set_markup(parts.length > 0 ? parts.join(' | ') : '⋯');
+            // Separate St.Label actors give title/value colors independent inline CSS.
+            this._renderMetrics(values, colors, visibleItems);
             this._lastLoggedError = null;
         } catch (error) {
-            this._label.text = '⋯';
+            for (const item of DISPLAY_ITEMS)
+                this._metrics?.[item]?.box.hide();
+            for (const separator of this._separators ?? [])
+                separator.hide();
+            if (this._emptyLabel) {
+                this._contentBox.set_child_at_index(this._emptyLabel, 0);
+                this._emptyLabel.show();
+            }
 
             const message = error instanceof Error ? error.message : String(error);
             if (message !== this._lastLoggedError) {
@@ -452,7 +538,10 @@ export default class TinyResourceMonitorExtension extends Extension {
 
         this._indicator?.destroy();
         this._indicator = null;
-        this._label = null;
+        this._contentBox = null;
+        this._metrics = null;
+        this._separators = null;
+        this._emptyLabel = null;
         this._settings = null;
         this._previousCpu = null;
         this._previousNetwork = null;

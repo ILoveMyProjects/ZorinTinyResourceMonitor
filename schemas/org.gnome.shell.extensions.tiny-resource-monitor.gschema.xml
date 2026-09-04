@@ -6,19 +6,16 @@
       <summary>Network interface priority</summary>
       <description>Ordered network interfaces. The first active interface is used for throughput display.</description>
     </key>
-
     <key name="panel-location" type="s">
       <default>'left'</default>
       <summary>Panel location</summary>
       <description>GNOME panel area used by the monitor: left, center or right.</description>
     </key>
-
     <key name="display-order" type="as">
       <default>['cpu', 'ram', 'download', 'upload']</default>
       <summary>Display order</summary>
       <description>Left-to-right order of monitor items.</description>
     </key>
-
     <key name="show-cpu" type="b">
       <default>true</default>
       <summary>Show CPU</summary>
@@ -44,7 +41,6 @@
       <summary>Show upload</summary>
       <description>Show the upload arrow and current upload speed.</description>
     </key>
-
     <key name="cpu-title-color" type="s">
       <default>''</default>
       <summary>CPU label color</summary>
@@ -84,12 +80,6 @@
       <default>''</default>
       <summary>Upload value color</summary>
       <description>Hex RGB color for the upload speed. Empty means panel theme color.</description>
-    </key>
-
-    <key name="update-manifest-url" type="s">
-      <default>''</default>
-      <summary>Update manifest URL</summary>
-      <description>HTTPS URL to update.json. GitHub Actions injects the repository-specific URL into release bundles.</description>
     </key>
   </schema>
 </schemalist>

@@ -14,6 +14,9 @@ Gio._promisify(Gio.Subprocess.prototype, 'communicate_utf8_async');
 const decoder = new TextDecoder('utf-8');
 const MAX_MANIFEST_BYTES = 256 * 1024;
 const MAX_PACKAGE_BYTES = 20 * 1024 * 1024;
+const PROJECT_REPO = 'ILoveMyProjects/ZorinTinyResourceMonitor';
+const UPDATE_MANIFEST_URL = `https://raw.githubusercontent.com/${PROJECT_REPO}/master/update.json`;
+const RELEASE_URL_PREFIX = `https://github.com/${PROJECT_REPO}/releases/download/`;
 const DISPLAY_ITEMS = ['cpu', 'ram', 'download', 'upload'];
 const DISPLAY_ITEM_DETAILS = {
     cpu: ['CPU', 'CPU label and percentage'],
@@ -167,6 +170,20 @@ function isHttpsUrl(value) {
     }
 }
 
+function isOfficialReleaseUrl(value) {
+    if (!value.startsWith(RELEASE_URL_PREFIX))
+        return false;
+
+    try {
+        const uri = GLib.Uri.parse(value, GLib.UriFlags.NONE);
+        return uri.get_scheme()?.toLowerCase() === 'https' &&
+            uri.get_host()?.toLowerCase() === 'github.com' &&
+            !uri.get_userinfo();
+    } catch {
+        return false;
+    }
+}
+
 function fetchBytes(session, url, maxBytes) {
     return new Promise((resolve, reject) => {
         if (!isHttpsUrl(url)) {
@@ -243,8 +260,12 @@ function validateManifest(raw, uuid) {
     if (!Array.isArray(raw.shell_versions) || !raw.shell_versions.includes('46'))
         throw new Error('This update does not declare GNOME Shell 46 compatibility.');
 
-    if (!isHttpsUrl(raw.download_url))
-        throw new Error('The update package URL is not a valid HTTPS address.');
+    const versionName = raw.version_name.trim().slice(0, 100);
+    const expectedDownloadUrl = `${RELEASE_URL_PREFIX}v${versionName}/tiny-resource-monitor@local-v${versionName}.zip`;
+    if (typeof raw.download_url !== 'string' ||
+        !isOfficialReleaseUrl(raw.download_url) ||
+        raw.download_url !== expectedDownloadUrl)
+        throw new Error('The update package URL does not match the expected official GitHub Release asset.');
 
     if (typeof raw.sha256 !== 'string' || !/^[a-fA-F0-9]{64}$/.test(raw.sha256))
         throw new Error('The manifest does not contain a valid SHA-256 checksum.');
@@ -253,7 +274,7 @@ function validateManifest(raw, uuid) {
         schema: 1,
         uuid: raw.uuid,
         version: raw.version,
-        versionName: raw.version_name.trim().slice(0, 100),
+        versionName,
         shellVersions: [...raw.shell_versions],
         downloadUrl: raw.download_url,
         sha256: raw.sha256.toLowerCase(),
@@ -374,7 +395,7 @@ export default class TinyResourceMonitorPreferences extends ExtensionPreferences
 
         this._buildCustomizePage(window, settings);
         this._buildNetworkPage(window, settings);
-        this._buildUpdatePage(window, settings);
+        this._buildUpdatePage(window);
         this._buildAboutPage(window);
     }
 
@@ -668,7 +689,7 @@ export default class TinyResourceMonitorPreferences extends ExtensionPreferences
         refresh();
     }
 
-    _buildUpdatePage(window, settings) {
+    _buildUpdatePage(window) {
         const page = new Adw.PreferencesPage({
             title: 'Update',
             icon_name: 'software-update-available-symbolic',
@@ -713,21 +734,15 @@ export default class TinyResourceMonitorPreferences extends ExtensionPreferences
 
         const sourceGroup = new Adw.PreferencesGroup({
             title: 'Update source',
-            description: 'GitHub Actions fills this address automatically in release bundles. For a local build, paste the HTTPS URL of update.json here.',
+            description: 'The update source is fixed to the official project repository and cannot be changed in preferences.',
         });
         page.add(sourceGroup);
 
-        const sourceRow = new Adw.EntryRow({
-            title: 'update.json URL (HTTPS)',
-            text: settings.get_string('update-manifest-url'),
+        const sourceRow = new Adw.ActionRow({
+            title: 'Official repository',
+            subtitle: `github.com/${PROJECT_REPO}`,
         });
         sourceGroup.add(sourceRow);
-        settings.bind(
-            'update-manifest-url',
-            sourceRow,
-            'text',
-            Gio.SettingsBindFlags.DEFAULT
-        );
 
         const changelogGroup = new Adw.PreferencesGroup({
             title: 'What’s new',
@@ -788,7 +803,6 @@ export default class TinyResourceMonitorPreferences extends ExtensionPreferences
             busy = value;
             checkButton.sensitive = !value;
             updateButton.sensitive = !value;
-            sourceRow.sensitive = !value;
         };
 
         const showError = error => {
@@ -803,11 +817,7 @@ export default class TinyResourceMonitorPreferences extends ExtensionPreferences
             if (busy)
                 return;
 
-            const manifestUrl = settings.get_string('update-manifest-url').trim();
-            if (!manifestUrl) {
-                showError(new Error('No update.json URL is configured. Set the update source below.'));
-                return;
-            }
+            const manifestUrl = UPDATE_MANIFEST_URL;
 
             setBusy(true);
             availableManifest = null;
@@ -908,7 +918,7 @@ export default class TinyResourceMonitorPreferences extends ExtensionPreferences
 
         const updateInfoGroup = new Adw.PreferencesGroup({
             title: 'Update security',
-            description: 'The updater downloads only the configured HTTPS manifest and its ZIP package. It verifies UUID, GNOME Shell 46 compatibility and SHA-256 before installation.',
+            description: 'The updater is pinned to the official project manifest and exact GitHub Release asset path. It verifies UUID, GNOME Shell 46 compatibility and SHA-256 before installation.',
         });
         page.add(updateInfoGroup);
     }

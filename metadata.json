@@ -5,7 +5,7 @@
   "shell-version": [
     "46"
   ],
-  "version": 4,
-  "version-name": "0.4.0",
+  "version": 5,
+  "version-name": "0.4.1",
   "settings-schema": "org.gnome.shell.extensions.tiny-resource-monitor"
 }
