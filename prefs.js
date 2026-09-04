@@ -30,6 +30,20 @@ const VISIBILITY_KEYS = {
     download: 'show-download',
     upload: 'show-upload',
 };
+const LOCATION_KEYS = {
+    cpu: 'cpu-location',
+    ram: 'ram-location',
+    download: 'download-location',
+    upload: 'upload-location',
+};
+const PLACEMENT_OPTIONS = [
+    ['left-near-activities', 'Left · Near Activities'],
+    ['left-far-activities', 'Left · Far from Activities'],
+    ['center-before-clock', 'Center · Before Date & Time'],
+    ['center-after-clock', 'Center · After Date & Time'],
+    ['right-before-system', 'Right · Before System Menu'],
+    ['right-after-system', 'Right · After System Menu'],
+];
 const COLOR_KEYS = [
     'cpu-title-color',
     'cpu-value-color',
@@ -406,41 +420,9 @@ export default class TinyResourceMonitorPreferences extends ExtensionPreferences
         });
         window.add(page);
 
-        const placementGroup = new Adw.PreferencesGroup({
-            title: 'Panel placement',
-            description: 'Choose which GNOME top-panel area contains the monitor. Changes apply immediately.',
-        });
-        page.add(placementGroup);
-
-        const locationModel = new Gtk.StringList();
-        locationModel.append('Left');
-        locationModel.append('Center');
-        locationModel.append('Right');
-
-        const locationRow = new Adw.ComboRow({
-            title: 'Panel area',
-            subtitle: 'Move the whole monitor to the left, center or right section.',
-            model: locationModel,
-        });
-        placementGroup.add(locationRow);
-
-        const locations = ['left', 'center', 'right'];
-        const currentLocation = settings.get_string('panel-location');
-        const currentIndex = locations.indexOf(currentLocation);
-        locationRow.selected = currentIndex >= 0 ? currentIndex : 0;
-        locationRow.connect('notify::selected', () => {
-            const value = locations[locationRow.selected] ?? 'left';
-            settings.set_string('panel-location', value);
-        });
-        settings.connect('changed::panel-location', () => {
-            const index = locations.indexOf(settings.get_string('panel-location'));
-            if (index >= 0 && locationRow.selected !== index)
-                locationRow.selected = index;
-        });
-
         const networkGroup = new Adw.PreferencesGroup({
             title: 'Network display',
-            description: 'This master switch controls the network section without changing your Download/Upload choices.',
+            description: 'This master switch controls network throughput without changing your Download/Upload choices.',
         });
         page.add(networkGroup);
 
@@ -456,9 +438,46 @@ export default class TinyResourceMonitorPreferences extends ExtensionPreferences
         networkGroup.add(networkRow);
         settings.bind('show-network', networkSwitch, 'active', Gio.SettingsBindFlags.DEFAULT);
 
+        const placementGroup = new Adw.PreferencesGroup({
+            title: 'Independent item placement',
+            description: 'Place CPU, RAM, Download and Upload independently. Items that share one slot follow the order configured below.',
+        });
+        page.add(placementGroup);
+
+        const placementLabels = new Gtk.StringList();
+        for (const [, label] of PLACEMENT_OPTIONS)
+            placementLabels.append(label);
+
+        for (const item of DISPLAY_ITEMS) {
+            const [title] = DISPLAY_ITEM_DETAILS[item];
+            const key = LOCATION_KEYS[item];
+            const row = new Adw.ComboRow({
+                title,
+                subtitle: item === 'cpu' || item === 'ram'
+                    ? 'Choose exactly where this metric appears in the top panel.'
+                    : 'Choose exactly where this network metric appears in the top panel.',
+                model: placementLabels,
+            });
+            placementGroup.add(row);
+
+            const sync = () => {
+                const value = settings.get_string(key);
+                const index = PLACEMENT_OPTIONS.findIndex(([candidate]) => candidate === value);
+                row.selected = index >= 0 ? index : 0;
+            };
+
+            row.connect('notify::selected', () => {
+                const value = PLACEMENT_OPTIONS[row.selected]?.[0] ?? PLACEMENT_OPTIONS[0][0];
+                if (settings.get_string(key) !== value)
+                    settings.set_string(key, value);
+            });
+            settings.connect(`changed::${key}`, sync);
+            sync();
+        }
+
         const itemsGroup = new Adw.PreferencesGroup({
-            title: 'Panel items',
-            description: 'Turn individual items on or off and use the arrows to choose their left-to-right order.',
+            title: 'Visibility and order',
+            description: 'Turn items on or off. The order matters only when two or more items use the same placement slot.',
         });
         page.add(itemsGroup);
 
@@ -505,7 +524,7 @@ export default class TinyResourceMonitorPreferences extends ExtensionPreferences
 
                 const upButton = new Gtk.Button({
                     icon_name: 'go-up-symbolic',
-                    tooltip_text: 'Move earlier',
+                    tooltip_text: 'Move earlier within a shared placement',
                     valign: Gtk.Align.CENTER,
                     sensitive: index > 0,
                 });
@@ -520,7 +539,7 @@ export default class TinyResourceMonitorPreferences extends ExtensionPreferences
 
                 const downButton = new Gtk.Button({
                     icon_name: 'go-down-symbolic',
-                    tooltip_text: 'Move later',
+                    tooltip_text: 'Move later within a shared placement',
                     valign: Gtk.Align.CENTER,
                     sensitive: index < order.length - 1,
                 });
@@ -546,6 +565,39 @@ export default class TinyResourceMonitorPreferences extends ExtensionPreferences
         settings.connect('changed::show-network', updateNetworkSensitivity);
         saveOrder();
         renderItems();
+
+        const widthGroup = new Adw.PreferencesGroup({
+            title: 'Network value width',
+            description: 'Fixed width prevents the top-bar layout from jumping when transfer speeds change length.',
+        });
+        page.add(widthGroup);
+
+        const widthModel = new Gtk.StringList();
+        widthModel.append('Dynamic');
+        widthModel.append('Fixed');
+
+        const addWidthModeRow = (key, title) => {
+            const row = new Adw.ComboRow({
+                title,
+                subtitle: 'Dynamic follows the text. Fixed keeps a stable right-aligned value field.',
+                model: widthModel,
+            });
+            widthGroup.add(row);
+
+            const sync = () => {
+                row.selected = settings.get_string(key) === 'dynamic' ? 0 : 1;
+            };
+            row.connect('notify::selected', () => {
+                const value = row.selected === 0 ? 'dynamic' : 'fixed';
+                if (settings.get_string(key) !== value)
+                    settings.set_string(key, value);
+            });
+            settings.connect(`changed::${key}`, sync);
+            sync();
+        };
+
+        addWidthModeRow('download-width-mode', 'Download value');
+        addWidthModeRow('upload-width-mode', 'Upload value');
 
         const colorsGroup = new Adw.PreferencesGroup({
             title: 'Colors',

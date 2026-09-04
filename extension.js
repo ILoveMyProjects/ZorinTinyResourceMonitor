@@ -13,8 +13,35 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 
 const UPDATE_INTERVAL_SECONDS = 1;
+const NETWORK_FIXED_VALUE_WIDTH = 96;
 const DISPLAY_ITEMS = ['cpu', 'ram', 'download', 'upload'];
-const PANEL_AREAS = new Set(['left', 'center', 'right']);
+const DISPLAY_TITLES = {
+    cpu: 'CPU',
+    ram: 'RAM',
+    download: '↓',
+    upload: '↑',
+};
+const ITEM_LOCATION_KEYS = {
+    cpu: 'cpu-location',
+    ram: 'ram-location',
+    download: 'download-location',
+    upload: 'upload-location',
+};
+const DEFAULT_ITEM_LOCATIONS = {
+    cpu: 'left-near-activities',
+    ram: 'left-near-activities',
+    download: 'right-before-system',
+    upload: 'right-before-system',
+};
+const PLACEMENTS = [
+    'left-near-activities',
+    'left-far-activities',
+    'center-before-clock',
+    'center-after-clock',
+    'right-before-system',
+    'right-after-system',
+];
+const PLACEMENT_SET = new Set(PLACEMENTS);
 const COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
 let decoder = null;
 
@@ -41,7 +68,6 @@ function readCpuSample() {
     const softirq = values[6] ?? 0;
     const steal = values[7] ?? 0;
 
-    // guest and guest_nice are already included in user/nice, so do not add them.
     return {
         idle: idle + iowait,
         total: user + nice + system + idle + iowait + irq + softirq + steal,
@@ -237,9 +263,10 @@ function getDisplayOrder(settings) {
     return order;
 }
 
-function getPanelArea(settings) {
-    const value = settings.get_string('panel-location');
-    return PANEL_AREAS.has(value) ? value : 'right';
+function getItemPlacement(settings, item) {
+    const key = ITEM_LOCATION_KEYS[item];
+    const value = key ? settings.get_string(key) : '';
+    return PLACEMENT_SET.has(value) ? value : DEFAULT_ITEM_LOCATIONS[item];
 }
 
 function getColor(settings, key) {
@@ -248,10 +275,91 @@ function getColor(settings, key) {
 }
 
 function setLabelColor(label, color) {
-    // Inline St.Widget CSS overrides the panel theme for this label only.
-    // Keeping title and value as separate actors avoids Pango-markup/theme
-    // interactions and makes every configured color independent.
-    label.set_style(color ? `color: ${color};` : '');
+    let clutterColor = null;
+
+    if (color) {
+        const [ok, parsed] = Clutter.Color.from_string(color);
+        if (ok)
+            clutterColor = parsed;
+    }
+
+    if (!clutterColor)
+        clutterColor = label.get_theme_node().get_foreground_color();
+
+    // Set the Clutter.Text foreground directly. This avoids theme/markup
+    // interactions and makes the network arrow colors independent too.
+    label.clutter_text.set_color(clutterColor);
+}
+
+function getPanelBox(area) {
+    if (area === 'left')
+        return Main.panel._leftBox;
+    if (area === 'center')
+        return Main.panel._centerBox;
+    return Main.panel._rightBox;
+}
+
+function getAnchorContainer(roleCandidates) {
+    for (const role of roleCandidates) {
+        const indicator = Main.panel.statusArea?.[role];
+        if (indicator?.container)
+            return indicator.container;
+    }
+    return null;
+}
+
+function getPlacementDefinition(placement) {
+    switch (placement) {
+    case 'left-near-activities':
+        return {area: 'left', anchorRoles: ['activities'], relation: 'after'};
+    case 'left-far-activities':
+        return {area: 'left', relation: 'end'};
+    case 'center-before-clock':
+        return {area: 'center', anchorRoles: ['dateMenu'], relation: 'before'};
+    case 'center-after-clock':
+        return {area: 'center', anchorRoles: ['dateMenu'], relation: 'after'};
+    case 'right-before-system':
+        return {area: 'right', anchorRoles: ['quickSettings', 'aggregateMenu'], relation: 'before'};
+    case 'right-after-system':
+        return {area: 'right', anchorRoles: ['quickSettings', 'aggregateMenu'], relation: 'after'};
+    default:
+        return {area: 'left', anchorRoles: ['activities'], relation: 'after'};
+    }
+}
+
+function getPlacementBaseIndex(placement) {
+    const definition = getPlacementDefinition(placement);
+    const box = getPanelBox(definition.area);
+    const children = box?.get_children?.() ?? [];
+
+    if (definition.relation === 'end')
+        return {area: definition.area, index: children.length};
+
+    const anchor = getAnchorContainer(definition.anchorRoles ?? []);
+    const anchorIndex = anchor ? children.indexOf(anchor) : -1;
+
+    if (anchorIndex < 0) {
+        return {
+            area: definition.area,
+            index: definition.relation === 'before' ? 0 : children.length,
+        };
+    }
+
+    return {
+        area: definition.area,
+        index: anchorIndex + (definition.relation === 'after' ? 1 : 0),
+    };
+}
+
+function setIndicatorVisible(indicator, visible) {
+    const actor = indicator?.container ?? indicator;
+    if (!actor)
+        return;
+
+    if (visible)
+        actor.show();
+    else
+        actor.hide();
 }
 
 export default class TinyResourceMonitorExtension extends Extension {
@@ -262,6 +370,8 @@ export default class TinyResourceMonitorExtension extends Extension {
         this._previousNetwork = null;
         this._previousTimestamp = null;
         this._lastLoggedError = null;
+        this._metrics = null;
+        this._fallback = null;
 
         this._settingsChangedId = this._settings.connect('changed', (_settings, key) => {
             if (
@@ -277,13 +387,20 @@ export default class TinyResourceMonitorExtension extends Extension {
             if (key === 'show-cpu')
                 this._previousCpu = null;
 
-            if (key === 'panel-location')
-                this._rebuildIndicator();
+            if (
+                key === 'display-order' ||
+                key === 'cpu-location' ||
+                key === 'ram-location' ||
+                key === 'download-location' ||
+                key === 'upload-location'
+            ) {
+                this._rebuildIndicators();
+            }
 
             this._update();
         });
 
-        this._buildIndicator();
+        this._buildIndicators();
         this._update();
 
         this._timeoutId = GLib.timeout_add_seconds(
@@ -296,15 +413,34 @@ export default class TinyResourceMonitorExtension extends Extension {
         );
     }
 
-    _createMetricActor(title) {
-        const box = new St.BoxLayout({
+    _connectRightClick(indicator) {
+        indicator.connect('button-press-event', (_actor, event) => {
+            if (event.get_button() === 3) {
+                this.openPreferences();
+                return Clutter.EVENT_STOP;
+            }
+            return Clutter.EVENT_PROPAGATE;
+        });
+    }
+
+    _createMetricIndicator(item) {
+        const indicator = new PanelMenu.Button(
+            0.0,
+            `${this.metadata.name}: ${item}`,
+            true
+        );
+        const contentBox = new St.BoxLayout({
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        const separatorLabel = new St.Label({
+            text: ' | ',
             y_align: Clutter.ActorAlign.CENTER,
         });
         const titleLabel = new St.Label({
-            text: title,
+            text: DISPLAY_TITLES[item],
             y_align: Clutter.ActorAlign.CENTER,
         });
-        const spacer = new St.Label({
+        const spacerLabel = new St.Label({
             text: ' ',
             y_align: Clutter.ActorAlign.CENTER,
         });
@@ -312,70 +448,103 @@ export default class TinyResourceMonitorExtension extends Extension {
             text: '--',
             y_align: Clutter.ActorAlign.CENTER,
         });
-
-        box.add_child(titleLabel);
-        box.add_child(spacer);
-        box.add_child(valueLabel);
-
-        return {box, titleLabel, valueLabel};
-    }
-
-    _buildIndicator() {
-        this._indicator = new PanelMenu.Button(0.0, this.metadata.name, true);
-        this._contentBox = new St.BoxLayout({
+        const valueBin = new St.Bin({
+            child: valueLabel,
+            x_align: Clutter.ActorAlign.END,
             y_align: Clutter.ActorAlign.CENTER,
         });
-        this._indicator.add_child(this._contentBox);
 
-        this._metrics = {
-            cpu: this._createMetricActor('CPU'),
-            ram: this._createMetricActor('RAM'),
-            download: this._createMetricActor('↓'),
-            upload: this._createMetricActor('↑'),
+        contentBox.add_child(separatorLabel);
+        contentBox.add_child(titleLabel);
+        contentBox.add_child(spacerLabel);
+        contentBox.add_child(valueBin);
+        indicator.add_child(contentBox);
+        this._connectRightClick(indicator);
+
+        return {
+            item,
+            indicator,
+            contentBox,
+            separatorLabel,
+            titleLabel,
+            valueLabel,
+            valueBin,
         };
-        this._separators = Array.from({length: 3}, () => new St.Label({
-            text: ' | ',
-            y_align: Clutter.ActorAlign.CENTER,
-        }));
-        this._emptyLabel = new St.Label({
+    }
+
+    _createFallbackIndicator() {
+        const indicator = new PanelMenu.Button(0.0, this.metadata.name, true);
+        const label = new St.Label({
             text: '⋯',
             y_align: Clutter.ActorAlign.CENTER,
         });
+        indicator.add_child(label);
+        this._connectRightClick(indicator);
+        return {indicator, label};
+    }
 
+    _buildIndicators() {
+        this._metrics = {};
         for (const item of DISPLAY_ITEMS)
-            this._contentBox.add_child(this._metrics[item].box);
-        for (const separator of this._separators)
-            this._contentBox.add_child(separator);
-        this._contentBox.add_child(this._emptyLabel);
+            this._metrics[item] = this._createMetricIndicator(item);
 
-        // Right click always opens the same native preferences window.
-        this._indicator.connect('button-press-event', (_actor, event) => {
-            if (event.get_button() === 3) {
-                this.openPreferences();
-                return true;
-            }
-            return false;
-        });
+        const order = getDisplayOrder(this._settings);
 
+        for (const placement of PLACEMENTS) {
+            const items = order.filter(item => getItemPlacement(this._settings, item) === placement);
+            if (items.length === 0)
+                continue;
+
+            const {area, index} = getPlacementBaseIndex(placement);
+            items.forEach((item, groupIndex) => {
+                const metric = this._metrics[item];
+                metric.separatorLabel.visible = groupIndex > 0;
+                Main.panel.addToStatusArea(
+                    `${this.uuid}-${item}`,
+                    metric.indicator,
+                    index + groupIndex,
+                    area
+                );
+            });
+        }
+
+        this._fallback = this._createFallbackIndicator();
+        const fallbackPlacement = getPlacementBaseIndex('left-near-activities');
         Main.panel.addToStatusArea(
-            this.uuid,
-            this._indicator,
-            0,
-            getPanelArea(this._settings)
+            `${this.uuid}-fallback`,
+            this._fallback.indicator,
+            fallbackPlacement.index,
+            fallbackPlacement.area
         );
+        setIndicatorVisible(this._fallback.indicator, false);
     }
 
-    _rebuildIndicator() {
-        this._indicator?.destroy();
-        this._indicator = null;
-        this._contentBox = null;
+    _destroyIndicators() {
+        if (this._metrics) {
+            for (const item of DISPLAY_ITEMS)
+                this._metrics[item]?.indicator?.destroy();
+        }
+        this._fallback?.indicator?.destroy();
         this._metrics = null;
-        this._separators = null;
-        this._emptyLabel = null;
-        this._buildIndicator();
+        this._fallback = null;
     }
 
-    _renderMetrics(values, colors, visibleItems) {
+    _rebuildIndicators() {
+        this._destroyIndicators();
+        this._buildIndicators();
+    }
+
+    _applyNetworkValueWidth(item) {
+        const metric = this._metrics?.[item];
+        if (!metric)
+            return;
+
+        const mode = this._settings.get_string(`${item}-width-mode`);
+        const fixed = mode === 'fixed';
+        metric.valueBin.set_width(fixed ? NETWORK_FIXED_VALUE_WIDTH : -1);
+    }
+
+    _renderMetrics(values, colors, isVisible) {
         const metricColors = {
             cpu: [colors.cpuTitle, colors.cpuValue],
             ram: [colors.ramTitle, colors.ramValue],
@@ -383,40 +552,45 @@ export default class TinyResourceMonitorExtension extends Extension {
             upload: [colors.uploadTitle, colors.uploadValue],
         };
 
+        let visibleCount = 0;
+        const separatorVisible = new Map();
+        const order = getDisplayOrder(this._settings);
+
+        for (const placement of PLACEMENTS) {
+            const visibleInPlacement = order.filter(item =>
+                getItemPlacement(this._settings, item) === placement && isVisible[item]
+            );
+            visibleInPlacement.forEach((item, index) => {
+                separatorVisible.set(item, index > 0);
+            });
+        }
+
         for (const item of DISPLAY_ITEMS) {
             const metric = this._metrics[item];
+            if (!metric)
+                continue;
+
             metric.valueLabel.text = values[item];
+            metric.separatorLabel.visible = separatorVisible.get(item) ?? false;
             setLabelColor(metric.titleLabel, metricColors[item][0]);
             setLabelColor(metric.valueLabel, metricColors[item][1]);
-            metric.box.hide();
-        }
 
-        for (const separator of this._separators)
-            separator.hide();
-        this._emptyLabel.hide();
+            if (item === 'download' || item === 'upload')
+                this._applyNetworkValueWidth(item);
 
-        if (visibleItems.length === 0) {
-            this._contentBox.set_child_at_index(this._emptyLabel, 0);
-            this._emptyLabel.show();
-            return;
-        }
-
-        let childIndex = 0;
-        visibleItems.forEach((item, index) => {
-            const metric = this._metrics[item];
-            this._contentBox.set_child_at_index(metric.box, childIndex++);
-            metric.box.show();
-
-            if (index < visibleItems.length - 1) {
-                const separator = this._separators[index];
-                this._contentBox.set_child_at_index(separator, childIndex++);
-                separator.show();
+            if (isVisible[item]) {
+                setIndicatorVisible(metric.indicator, true);
+                visibleCount++;
+            } else {
+                setIndicatorVisible(metric.indicator, false);
             }
-        });
+        }
+
+        setIndicatorVisible(this._fallback?.indicator, visibleCount === 0);
     }
 
     _update() {
-        if (!this._contentBox || !this._metrics || !this._settings)
+        if (!this._metrics || !this._settings)
             return;
 
         try {
@@ -501,21 +675,15 @@ export default class TinyResourceMonitorExtension extends Extension {
                 download: networkNeeded && Boolean(iface) && showDownload,
                 upload: networkNeeded && Boolean(iface) && showUpload,
             };
-            const visibleItems = getDisplayOrder(this._settings)
-                .filter(item => isVisible[item]);
 
-            // Separate St.Label actors give title/value colors independent inline CSS.
-            this._renderMetrics(values, colors, visibleItems);
+            this._renderMetrics(values, colors, isVisible);
             this._lastLoggedError = null;
         } catch (error) {
-            for (const item of DISPLAY_ITEMS)
-                this._metrics?.[item]?.box.hide();
-            for (const separator of this._separators ?? [])
-                separator.hide();
-            if (this._emptyLabel) {
-                this._contentBox.set_child_at_index(this._emptyLabel, 0);
-                this._emptyLabel.show();
+            if (this._metrics) {
+                for (const item of DISPLAY_ITEMS)
+                    setIndicatorVisible(this._metrics[item]?.indicator, false);
             }
+            setIndicatorVisible(this._fallback?.indicator, true);
 
             const message = error instanceof Error ? error.message : String(error);
             if (message !== this._lastLoggedError) {
@@ -536,12 +704,7 @@ export default class TinyResourceMonitorExtension extends Extension {
             this._settingsChangedId = null;
         }
 
-        this._indicator?.destroy();
-        this._indicator = null;
-        this._contentBox = null;
-        this._metrics = null;
-        this._separators = null;
-        this._emptyLabel = null;
+        this._destroyIndicators();
         this._settings = null;
         this._previousCpu = null;
         this._previousNetwork = null;

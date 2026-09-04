@@ -6,15 +6,40 @@
       <summary>Network interface priority</summary>
       <description>Ordered network interfaces. The first active interface is used for throughput display.</description>
     </key>
-    <key name="panel-location" type="s">
-      <default>'left'</default>
-      <summary>Panel location</summary>
-      <description>GNOME panel area used by the monitor: left, center or right.</description>
-    </key>
     <key name="display-order" type="as">
       <default>['cpu', 'ram', 'download', 'upload']</default>
       <summary>Display order</summary>
-      <description>Left-to-right order of monitor items.</description>
+      <description>Order used when multiple monitor items share the same panel placement slot.</description>
+    </key>
+    <key name="cpu-location" type="s">
+      <default>'left-near-activities'</default>
+      <summary>CPU panel location</summary>
+      <description>Independent top-panel placement slot for CPU.</description>
+    </key>
+    <key name="ram-location" type="s">
+      <default>'left-near-activities'</default>
+      <summary>RAM panel location</summary>
+      <description>Independent top-panel placement slot for RAM.</description>
+    </key>
+    <key name="download-location" type="s">
+      <default>'right-before-system'</default>
+      <summary>Download panel location</summary>
+      <description>Independent top-panel placement slot for download throughput.</description>
+    </key>
+    <key name="upload-location" type="s">
+      <default>'right-before-system'</default>
+      <summary>Upload panel location</summary>
+      <description>Independent top-panel placement slot for upload throughput.</description>
+    </key>
+    <key name="download-width-mode" type="s">
+      <default>'fixed'</default>
+      <summary>Download value width mode</summary>
+      <description>Dynamic follows the text width; fixed keeps a stable width to prevent panel movement.</description>
+    </key>
+    <key name="upload-width-mode" type="s">
+      <default>'fixed'</default>
+      <summary>Upload value width mode</summary>
+      <description>Dynamic follows the text width; fixed keeps a stable width to prevent panel movement.</description>
     </key>
     <key name="show-cpu" type="b">
       <default>true</default>

@@ -1,13 +1,16 @@
 {
   "schema": 1,
   "uuid": "tiny-resource-monitor@local",
-  "version": 5,
+  "version": 6,
   "version_name": "0.5.0",
-  "shell_versions": ["46"],
+  "shell_versions": [
+    "46"
+  ],
   "download_url": "https://github.com/ILoveMyProjects/ZorinTinyResourceMonitor/releases/download/v0.5.0/tiny-resource-monitor@local-v0.5.0.zip",
   "sha256": "REPLACE_WITH_64_HEX_SHA256",
   "changelog": [
-    "Example change number 1",
-    "Example change number 2"
+    "Independent per-item panel placement.",
+    "Dynamic or fixed Download/Upload value widths.",
+    "Improved independent label and arrow colors."
   ]
 }

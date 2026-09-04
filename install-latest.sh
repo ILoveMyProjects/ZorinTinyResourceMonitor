@@ -20,8 +20,102 @@ need_cmd python3
 need_cmd sha256sum
 need_cmd gnome-shell
 need_cmd gnome-extensions
+need_cmd gsettings
 need_cmd grep
 need_cmd mktemp
+
+update_shell_extension_list() {
+    local key="$1"
+    local action="$2"
+    local current new_value
+
+    current="$(gsettings get org.gnome.shell "$key")" || return 1
+    new_value="$(python3 - "$current" "$EXPECTED_UUID" "$action" <<'PYGSET'
+import ast
+import sys
+
+raw = sys.argv[1].strip()
+uuid = sys.argv[2]
+action = sys.argv[3]
+if raw.startswith('@as '):
+    raw = raw[4:].strip()
+try:
+    values = ast.literal_eval(raw)
+except Exception as exc:
+    raise SystemExit(f'Could not parse GNOME Shell {action} list: {exc}')
+if not isinstance(values, list) or not all(isinstance(item, str) for item in values):
+    raise SystemExit('GNOME Shell extension list has an unexpected format')
+
+# Preserve order and remove accidental duplicates while changing only our UUID.
+seen = set()
+clean = []
+for item in values:
+    if item in seen:
+        continue
+    seen.add(item)
+    clean.append(item)
+
+if action == 'add':
+    if uuid not in seen:
+        clean.append(uuid)
+elif action == 'remove':
+    clean = [item for item in clean if item != uuid]
+else:
+    raise SystemExit('Unknown list update action')
+
+print(repr(clean))
+PYGSET
+)" || return 1
+
+    gsettings set org.gnome.shell "$key" "$new_value"
+}
+
+shell_extension_list_contains() {
+    local key="$1"
+    local current
+
+    current="$(gsettings get org.gnome.shell "$key")" || return 1
+    python3 - "$current" "$EXPECTED_UUID" <<'PYCONTAINS'
+import ast
+import sys
+
+raw = sys.argv[1].strip()
+if raw.startswith('@as '):
+    raw = raw[4:].strip()
+try:
+    values = ast.literal_eval(raw)
+except Exception:
+    raise SystemExit(2)
+if not isinstance(values, list) or not all(isinstance(item, str) for item in values):
+    raise SystemExit(2)
+raise SystemExit(0 if sys.argv[2] in values else 1)
+PYCONTAINS
+}
+
+persist_extension_enabled() {
+    if [[ "$(gsettings writable org.gnome.shell enabled-extensions 2>/dev/null || true)" != "true" ]]; then
+        fail "GNOME Shell's enabled-extensions setting is locked. The extension was installed, but this account cannot mark it to start automatically."
+    fi
+
+    update_shell_extension_list enabled-extensions add ||
+        fail "Could not add $EXPECTED_UUID to GNOME Shell's enabled-extensions list."
+
+    # If GNOME exposes disabled-extensions, remove only our UUID from it.
+    # Never change the user's other disabled extensions.
+    if gsettings list-keys org.gnome.shell 2>/dev/null | grep -Fxq 'disabled-extensions'; then
+        if shell_extension_list_contains disabled-extensions; then
+            if [[ "$(gsettings writable org.gnome.shell disabled-extensions 2>/dev/null || true)" != "true" ]]; then
+                fail "GNOME Shell's disabled-extensions setting is locked and still contains $EXPECTED_UUID."
+            fi
+            update_shell_extension_list disabled-extensions remove ||
+                fail "Could not remove $EXPECTED_UUID from GNOME Shell's disabled-extensions list."
+        fi
+    fi
+
+    if ! shell_extension_list_contains enabled-extensions; then
+        fail "GNOME Shell did not persist $EXPECTED_UUID in enabled-extensions."
+    fi
+}
 
 SHELL_VERSION="$(gnome-shell --version | awk '{print $3}')"
 [[ -n "$SHELL_VERSION" ]] || fail "Could not determine GNOME Shell version."
@@ -88,8 +182,12 @@ if not isinstance(shell_versions, list) or not shell_versions or not all(isinsta
     raise SystemExit('Manifest shell_versions is invalid')
 
 download_url = data.get('download_url')
-if not isinstance(download_url, str) or not download_url.startswith(release_prefix):
-    raise SystemExit('Manifest download_url is outside the expected GitHub Releases location')
+expected_download_url = (
+    f'{release_prefix}v{version_name.strip()}/'
+    f'tiny-resource-monitor@local-v{version_name.strip()}.zip'
+)
+if not isinstance(download_url, str) or download_url != expected_download_url:
+    raise SystemExit('Manifest download_url does not match the expected official GitHub Release asset')
 parsed = urlparse(download_url)
 if parsed.scheme != 'https' or parsed.hostname != 'github.com' or parsed.username or parsed.password:
     raise SystemExit('Manifest download_url must be a plain HTTPS github.com URL')
@@ -193,16 +291,17 @@ PY
 printf 'Package metadata: OK\n'
 printf 'Installing %s...\n' "$VERSION_NAME"
 gnome-extensions install --force "$ZIP_FILE"
-printf 'Installation command completed successfully.\n\n'
+printf 'Installation command completed successfully.\n'
 
+printf 'Marking the extension to start automatically in GNOME Shell...\n'
+persist_extension_enabled
+printf 'Persistent enabled state: OK\n'
+
+# If the current Shell session already knows the extension, enable it now as a convenience.
+# A freshly installed extension on Wayland may only be discovered after the next login.
 if gnome-extensions list --user 2>/dev/null | grep -Fxq "$EXPECTED_UUID"; then
-    if gnome-extensions enable "$EXPECTED_UUID" >/dev/null 2>&1; then
-        printf 'Extension enabled: %s\n' "$EXPECTED_UUID"
-    else
-        printf 'The extension is installed, but GNOME Shell could not enable it in this session.\n'
-        printf 'Log out and log back in, then run:\n  gnome-extensions enable %q\n' "$EXPECTED_UUID"
-    fi
-else
-    printf 'The extension is installed. GNOME Shell has not loaded the new extension yet.\n'
-    printf 'On Wayland, log out and log back in, then run:\n  gnome-extensions enable %q\n' "$EXPECTED_UUID"
+    gnome-extensions enable "$EXPECTED_UUID" >/dev/null 2>&1 || true
 fi
+
+printf '\nInstallation complete.\n'
+printf 'If the monitor is not visible yet, log out and log back in. It is already marked to start automatically; no post-login command is required.\n'

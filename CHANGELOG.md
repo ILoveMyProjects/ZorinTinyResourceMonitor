@@ -1,11 +1,25 @@
 # Changelog
 
-- Documentation/config examples now use the canonical GitHub repository `ILoveMyProjects/ZorinTinyResourceMonitor`.
+## 0.5.0
 
-## Unreleased
+- Added independent placement for CPU, RAM, Download and Upload instead of moving the monitor as one block.
+- Added six placement slots: Left near/far from Activities, Center before/after Date & Time, and Right before/after System Menu.
+- Kept `display-order` as the tie-breaker when multiple metrics use the same placement slot.
+- Changed default placement to CPU/RAM on the left and Download/Upload before the System Menu on the right.
+- Added independent Dynamic / Fixed width modes for Download and Upload values.
+- Fixed-width network values are right-aligned and keep nearby top-bar content from jumping as speed strings change.
+- Strengthened label/arrow color application by setting the Clutter text foreground directly, including the Download arrow.
+- Retained the fixed official updater source and one-command installer with persistent enablement.
 
-- Added a repository-level `install-latest.sh` bootstrap installer for the latest GitHub Release.
-- Updated GitHub Actions checkout from `actions/checkout@v4` to `actions/checkout@v6`.
+## 0.4.1
+
+- Fixed CPU label color application by using separate styled `St.Label` actors for metric titles and values.
+- Fixed the update source to `ILoveMyProjects/ZorinTinyResourceMonitor`; it is no longer editable in preferences.
+- Restricted updater package URLs to the official GitHub Releases path.
+- Made `install-latest.sh` persist the extension in GNOME Shell's `enabled-extensions` list while preserving all other UUIDs.
+- Removed the extension UUID from GNOME Shell's `disabled-extensions` list when that key is available and writable.
+- Updated first-install flow so a Wayland user only needs to log out and back in; no manual enable command is required.
+- Added repository-level one-command installer and updated GitHub Actions checkout to `actions/checkout@v6`.
 
 ## 0.4.0
 

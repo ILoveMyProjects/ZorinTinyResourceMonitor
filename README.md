@@ -10,9 +10,9 @@ CPU 7% | RAM 31% | ↓ 3.7 MB/s | ↑ 420.1 KB/s
 
 Right-click the monitor to open one native GNOME preferences window. The window contains four pages:
 
-- **Customize** — visibility, left-to-right item order, panel area and colors.
+- **Customize** — per-item placement, visibility/order, network value width and colors.
 - **Network** — detected network adapters and their priority.
-- **Update** — update source, version check, changelog and installation.
+- **Update** — fixed official update source, version check, changelog and installation.
 - **About** — extension version, GNOME target and update-security notes.
 
 
@@ -24,13 +24,9 @@ Install the latest published release with one command:
 curl -fsSL https://raw.githubusercontent.com/ILoveMyProjects/ZorinTinyResourceMonitor/master/install-latest.sh | bash
 ```
 
-The installer reads the current `update.json`, verifies the extension UUID, GNOME Shell compatibility, release ZIP URL and SHA-256 checksum, validates the ZIP metadata, and then installs it with `gnome-extensions install --force`.
+The installer reads the current `update.json`, verifies the extension UUID, GNOME Shell compatibility, official release ZIP URL and SHA-256 checksum, validates the ZIP metadata, installs it with `gnome-extensions install --force`, and safely adds `tiny-resource-monitor@local` to GNOME Shell's existing `enabled-extensions` list. It does not replace or remove the user's other enabled extensions.
 
-On Wayland, log out and log back in after the first installation. Then, if necessary, enable the extension:
-
-```bash
-gnome-extensions enable tiny-resource-monitor@local
-```
+On Wayland, if the monitor is not visible immediately after the first installation, **log out and log back in**. The extension is already marked to start automatically; there is no command to run after login.
 
 If you prefer to inspect the installer before running it:
 
@@ -44,29 +40,61 @@ After the first installation, later releases can be installed from **Right click
 
 ## Customize
 
+### Independent placement
+
+CPU, RAM, Download and Upload can each be placed independently. Every item has the same six placement choices:
+
+- **Left · Near Activities**
+- **Left · Far from Activities**
+- **Center · Before Date & Time**
+- **Center · After Date & Time**
+- **Right · Before System Menu**
+- **Right · After System Menu**
+
+This makes layouts such as these possible:
+
+```text
+Left:   RAM 31%
+Center: ↓ 3.7 MB/s
+Right:  CPU 7% | ↑ 420.1 KB/s
+```
+
+or CPU before the System Menu while RAM remains near Activities.
+
+The v0.5.0 defaults are CPU and RAM near Activities on the left, with Download and Upload before the System Menu on the right.
+
+Precise before/after placement uses GNOME Shell 46 panel anchors (`Activities`, `Date & Time`, and `System Menu`). It is intentionally targeted to GNOME Shell 46.
+
 ### Visibility
 
 The network section has a master **Network** switch. CPU, RAM, Download and Upload can each be enabled or disabled independently.
 
 If all data items are disabled, the extension keeps a tiny `⋯` right-click target in the panel so the preferences window is still reachable.
 
-### Panel placement
+### Order inside a shared placement
 
-Choose one of GNOME Shell's panel areas:
-
-- **Left**
-- **Center**
-- **Right**
-
-Version 0.4.0 defaults to **Left**.
-
-### Display order
-
-CPU, RAM, Download and Upload are stored as an ordered list. Use the up/down controls to choose the exact left-to-right order, for example:
+Use the up/down controls to set ordering when two or more items use the same placement slot. For example, if CPU and RAM are both `Left · Near Activities`, they can appear as either:
 
 ```text
-RAM 31% | CPU 7% | ↑ 420.1 KB/s | ↓ 3.7 MB/s
+CPU 7% | RAM 31%
 ```
+
+or:
+
+```text
+RAM 31% | CPU 7%
+```
+
+Items assigned to different placement slots are independent of this ordering.
+
+### Network value width
+
+Download and Upload each have an independent **Value width** option:
+
+- **Dynamic** — the value field follows the current text width.
+- **Fixed** — the value field keeps a stable width and right-aligns the transfer rate.
+
+`Fixed` prevents nearby panel content from jumping when a value changes between strings such as `132 B/s`, `14.4 KB/s` and `1.2 MB/s`.
 
 ### Colors
 
@@ -80,6 +108,8 @@ Each semantic part can use a separate color:
 - Download value (`3.7 MB/s`)
 - Upload arrow (`↑`)
 - Upload value (`420.1 KB/s`)
+
+The panel renderer keeps every title/value in a separate text actor and applies configured foreground colors independently, including the Download arrow.
 
 An empty color setting means **use the GNOME panel theme color**. Each color can be reset individually, and **Reset colors** resets all eight values.
 
@@ -121,7 +151,7 @@ https://github.com/ILoveMyProjects/ZorinTinyResourceMonitor/releases/download/v<
 
 ## Built-in updater
 
-The Update page uses a small HTTPS JSON manifest. Nothing is checked automatically in the background; network access starts only after **Check for updates** is clicked.
+The Update page uses a small HTTPS JSON manifest from the fixed official project repository. The source cannot be edited in preferences. Nothing is checked automatically in the background; network access starts only after **Check for updates** is clicked.
 
 Expected `update.json` format:
 
@@ -129,7 +159,7 @@ Expected `update.json` format:
 {
   "schema": 1,
   "uuid": "tiny-resource-monitor@local",
-  "version": 5,
+  "version": 6,
   "version_name": "0.5.0",
   "shell_versions": ["46"],
   "download_url": "https://github.com/ILoveMyProjects/ZorinTinyResourceMonitor/releases/download/v0.5.0/tiny-resource-monitor@local-v0.5.0.zip",
@@ -147,7 +177,7 @@ Before installation the updater verifies:
 2. exact extension UUID,
 3. integer version number,
 4. declared GNOME Shell 46 compatibility,
-5. HTTPS download URL,
+5. download URL is under `https://github.com/ILoveMyProjects/ZorinTinyResourceMonitor/releases/download/`,
 6. SHA-256 of the downloaded ZIP.
 
 Only after all checks pass does it run:
@@ -160,11 +190,15 @@ The command is launched through `Gio.Subprocess` with a fixed argument vector, n
 
 After installation GNOME Shell must load the new extension code in a new session, so log out and log back in on Wayland.
 
-### Local builds
+### Fixed update source
 
-The source-tree schema intentionally has an empty update URL. In a local development build you can paste the HTTPS URL to `update.json` into the **Update** page.
+The update manifest is hard-coded to:
 
-GitHub release bundles do not need this manual step: the included GitHub Actions workflow injects the correct repository-specific raw `update.json` URL while building the release ZIP.
+```text
+https://raw.githubusercontent.com/ILoveMyProjects/ZorinTinyResourceMonitor/master/update.json
+```
+
+The package download URL must also stay under this project's GitHub Releases path. There is no editable GSettings key or preferences field for changing the update source. Local development builds use the same official source when **Check for updates** is clicked.
 
 ## GitHub release workflow
 
@@ -183,7 +217,7 @@ git tag v0.5.0
 git push origin v0.5.0
 ```
 
-GitHub Actions then automatically checks the tag, injects the update URL, builds the extension ZIP, calculates SHA-256, generates `update.json`, creates a GitHub Release and publishes the new manifest to the default branch.
+GitHub Actions then automatically checks the tag, builds the extension ZIP, calculates SHA-256, generates `update.json`, creates a GitHub Release and publishes the new manifest to the default branch.
 
 Client machines download the already-built release ZIP; they do not build or compile the extension themselves.
 
@@ -219,19 +253,13 @@ For the first installation GNOME Shell may need to reload the extension list.
 
 ### Wayland
 
-Log out and log back in, then:
+When using `install-latest.sh`, log out and log back in if the monitor is not visible immediately. The installer has already persisted the enabled state.
 
-```bash
-gnome-extensions enable tiny-resource-monitor@local
-```
+When using the low-level `./install.sh` developer helper instead, GNOME may still require manual enablement because that helper intentionally does not modify the user's GNOME Shell enabled-extension list.
 
 ### X11
 
-Press `Alt+F2`, enter `r`, press Enter, then:
-
-```bash
-gnome-extensions enable tiny-resource-monitor@local
-```
+When using `install-latest.sh`, the extension is marked enabled automatically. If GNOME Shell has not discovered the fresh install yet, restart the Shell session (for example with `Alt+F2`, `r`) or log out and back in.
 
 Open preferences from the terminal if needed:
 
