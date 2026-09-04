@@ -13,7 +13,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 
 const UPDATE_INTERVAL_SECONDS = 1;
-const NETWORK_FIXED_VALUE_WIDTH = 96;
+const NETWORK_FIXED_VALUE_WIDTH = 78;
 const DISPLAY_ITEMS = ['cpu', 'ram', 'download', 'upload'];
 const DISPLAY_TITLES = {
     cpu: 'CPU',
@@ -275,20 +275,13 @@ function getColor(settings, key) {
 }
 
 function setLabelColor(label, color) {
-    let clutterColor = null;
+    if (!label)
+        return;
 
-    if (color) {
-        const [ok, parsed] = Clutter.Color.from_string(color);
-        if (ok)
-            clutterColor = parsed;
-    }
-
-    if (!clutterColor)
-        clutterColor = label.get_theme_node().get_foreground_color();
-
-    // Set the Clutter.Text foreground directly. This avoids theme/markup
-    // interactions and makes the network arrow colors independent too.
-    label.clutter_text.set_color(clutterColor);
+    // Use St's inline CSS on the actual label actor. Inline style has higher
+    // priority than the panel theme and keeps every title/value mapping
+    // independent, including the download/upload arrow glyphs.
+    label.set_style(color ? `color: ${color};` : '');
 }
 
 function getPanelBox(area) {
@@ -423,12 +416,7 @@ export default class TinyResourceMonitorExtension extends Extension {
         });
     }
 
-    _createMetricIndicator(item) {
-        const indicator = new PanelMenu.Button(
-            0.0,
-            `${this.metadata.name}: ${item}`,
-            true
-        );
+    _createMetricActor(item) {
         const contentBox = new St.BoxLayout({
             y_align: Clutter.ActorAlign.CENTER,
         });
@@ -458,18 +446,29 @@ export default class TinyResourceMonitorExtension extends Extension {
         contentBox.add_child(titleLabel);
         contentBox.add_child(spacerLabel);
         contentBox.add_child(valueBin);
-        indicator.add_child(contentBox);
-        this._connectRightClick(indicator);
 
         return {
             item,
-            indicator,
             contentBox,
             separatorLabel,
             titleLabel,
             valueLabel,
             valueBin,
         };
+    }
+
+    _createSlotIndicator(placement) {
+        const indicator = new PanelMenu.Button(
+            0.0,
+            `${this.metadata.name}: ${placement}`,
+            true
+        );
+        const contentBox = new St.BoxLayout({
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        indicator.add_child(contentBox);
+        this._connectRightClick(indicator);
+        return {placement, indicator, contentBox, items: []};
     }
 
     _createFallbackIndicator() {
@@ -486,8 +485,9 @@ export default class TinyResourceMonitorExtension extends Extension {
     _buildIndicators() {
         this._metrics = {};
         for (const item of DISPLAY_ITEMS)
-            this._metrics[item] = this._createMetricIndicator(item);
+            this._metrics[item] = this._createMetricActor(item);
 
+        this._slots = {};
         const order = getDisplayOrder(this._settings);
 
         for (const placement of PLACEMENTS) {
@@ -495,17 +495,20 @@ export default class TinyResourceMonitorExtension extends Extension {
             if (items.length === 0)
                 continue;
 
+            const slot = this._createSlotIndicator(placement);
+            slot.items = items;
+
+            for (const item of items)
+                slot.contentBox.add_child(this._metrics[item].contentBox);
+
             const {area, index} = getPlacementBaseIndex(placement);
-            items.forEach((item, groupIndex) => {
-                const metric = this._metrics[item];
-                metric.separatorLabel.visible = groupIndex > 0;
-                Main.panel.addToStatusArea(
-                    `${this.uuid}-${item}`,
-                    metric.indicator,
-                    index + groupIndex,
-                    area
-                );
-            });
+            Main.panel.addToStatusArea(
+                `${this.uuid}-slot-${placement}`,
+                slot.indicator,
+                index,
+                area
+            );
+            this._slots[placement] = slot;
         }
 
         this._fallback = this._createFallbackIndicator();
@@ -520,12 +523,13 @@ export default class TinyResourceMonitorExtension extends Extension {
     }
 
     _destroyIndicators() {
-        if (this._metrics) {
-            for (const item of DISPLAY_ITEMS)
-                this._metrics[item]?.indicator?.destroy();
+        if (this._slots) {
+            for (const slot of Object.values(this._slots))
+                slot?.indicator?.destroy();
         }
         this._fallback?.indicator?.destroy();
         this._metrics = null;
+        this._slots = null;
         this._fallback = null;
     }
 
@@ -542,6 +546,9 @@ export default class TinyResourceMonitorExtension extends Extension {
         const mode = this._settings.get_string(`${item}-width-mode`);
         const fixed = mode === 'fixed';
         metric.valueBin.set_width(fixed ? NETWORK_FIXED_VALUE_WIDTH : -1);
+        metric.valueBin.x_align = fixed
+            ? Clutter.ActorAlign.END
+            : Clutter.ActorAlign.START;
     }
 
     _renderMetrics(values, colors, isVisible) {
@@ -553,17 +560,6 @@ export default class TinyResourceMonitorExtension extends Extension {
         };
 
         let visibleCount = 0;
-        const separatorVisible = new Map();
-        const order = getDisplayOrder(this._settings);
-
-        for (const placement of PLACEMENTS) {
-            const visibleInPlacement = order.filter(item =>
-                getItemPlacement(this._settings, item) === placement && isVisible[item]
-            );
-            visibleInPlacement.forEach((item, index) => {
-                separatorVisible.set(item, index > 0);
-            });
-        }
 
         for (const item of DISPLAY_ITEMS) {
             const metric = this._metrics[item];
@@ -571,19 +567,24 @@ export default class TinyResourceMonitorExtension extends Extension {
                 continue;
 
             metric.valueLabel.text = values[item];
-            metric.separatorLabel.visible = separatorVisible.get(item) ?? false;
             setLabelColor(metric.titleLabel, metricColors[item][0]);
             setLabelColor(metric.valueLabel, metricColors[item][1]);
 
             if (item === 'download' || item === 'upload')
                 this._applyNetworkValueWidth(item);
 
-            if (isVisible[item]) {
-                setIndicatorVisible(metric.indicator, true);
+            setIndicatorVisible(metric.contentBox, isVisible[item]);
+            if (isVisible[item])
                 visibleCount++;
-            } else {
-                setIndicatorVisible(metric.indicator, false);
+        }
+
+        for (const [placement, slot] of Object.entries(this._slots ?? {})) {
+            const visibleItems = slot.items.filter(item => isVisible[item]);
+            for (const item of slot.items) {
+                const index = visibleItems.indexOf(item);
+                this._metrics[item].separatorLabel.visible = index > 0;
             }
+            setIndicatorVisible(slot.indicator, visibleItems.length > 0);
         }
 
         setIndicatorVisible(this._fallback?.indicator, visibleCount === 0);
@@ -679,9 +680,9 @@ export default class TinyResourceMonitorExtension extends Extension {
             this._renderMetrics(values, colors, isVisible);
             this._lastLoggedError = null;
         } catch (error) {
-            if (this._metrics) {
-                for (const item of DISPLAY_ITEMS)
-                    setIndicatorVisible(this._metrics[item]?.indicator, false);
+            if (this._slots) {
+                for (const slot of Object.values(this._slots))
+                    setIndicatorVisible(slot?.indicator, false);
             }
             setIndicatorVisible(this._fallback?.indicator, true);
 

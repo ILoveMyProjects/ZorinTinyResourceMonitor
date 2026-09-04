@@ -61,7 +61,7 @@ Right:  CPU 7% | ↑ 420.1 KB/s
 
 or CPU before the System Menu while RAM remains near Activities.
 
-The v0.5.0 defaults are CPU and RAM near Activities on the left, with Download and Upload before the System Menu on the right.
+The v0.5.x defaults are CPU and RAM near Activities on the left, with Download and Upload before the System Menu on the right.
 
 Precise before/after placement uses GNOME Shell 46 panel anchors (`Activities`, `Date & Time`, and `System Menu`). It is intentionally targeted to GNOME Shell 46.
 
@@ -92,9 +92,9 @@ Items assigned to different placement slots are independent of this ordering.
 Download and Upload each have an independent **Value width** option:
 
 - **Dynamic** — the value field follows the current text width.
-- **Fixed** — the value field keeps a stable width and right-aligns the transfer rate.
+- **Fixed** — the value field keeps a compact stable width so changing transfer-rate strings do not move nearby panel content.
 
-`Fixed` prevents nearby panel content from jumping when a value changes between strings such as `132 B/s`, `14.4 KB/s` and `1.2 MB/s`.
+`Fixed` prevents nearby panel content from jumping when a value changes between strings such as `132 B/s`, `14.4 KB/s` and `1.2 MB/s`. Items that share one placement slot are grouped into one compact panel indicator to avoid repeated GNOME Shell button padding.
 
 ### Colors
 
@@ -160,9 +160,9 @@ Expected `update.json` format:
   "schema": 1,
   "uuid": "tiny-resource-monitor@local",
   "version": 6,
-  "version_name": "0.5.0",
+  "version_name": "0.5.1",
   "shell_versions": ["46"],
-  "download_url": "https://github.com/ILoveMyProjects/ZorinTinyResourceMonitor/releases/download/v0.5.0/tiny-resource-monitor@local-v0.5.0.zip",
+  "download_url": "https://github.com/ILoveMyProjects/ZorinTinyResourceMonitor/releases/download/v0.5.1/tiny-resource-monitor@local-v0.5.1.zip",
   "sha256": "64_HEX_CHARACTERS",
   "changelog": [
     "First change",
@@ -207,14 +207,14 @@ The repository includes `.github/workflows/release.yml`.
 For a new release:
 
 1. Increment integer `version` in `metadata.json`.
-2. Set `version-name`, for example `0.5.0`.
+2. Set `version-name`, for example `0.5.1`.
 3. Update `RELEASE_NOTES.md`.
 4. Commit and push the source.
 5. Create and push a matching tag:
 
 ```bash
-git tag v0.5.0
-git push origin v0.5.0
+git tag v0.5.1
+git push origin v0.5.1
 ```
 
 GitHub Actions then automatically checks the tag, builds the extension ZIP, calculates SHA-256, generates `update.json`, creates a GitHub Release and publishes the new manifest to the default branch.

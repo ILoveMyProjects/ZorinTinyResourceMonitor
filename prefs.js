@@ -568,7 +568,7 @@ export default class TinyResourceMonitorPreferences extends ExtensionPreferences
 
         const widthGroup = new Adw.PreferencesGroup({
             title: 'Network value width',
-            description: 'Fixed width prevents the top-bar layout from jumping when transfer speeds change length.',
+            description: 'Fixed width prevents the top-bar layout from jumping while using a compact value field.',
         });
         page.add(widthGroup);
 
@@ -579,7 +579,7 @@ export default class TinyResourceMonitorPreferences extends ExtensionPreferences
         const addWidthModeRow = (key, title) => {
             const row = new Adw.ComboRow({
                 title,
-                subtitle: 'Dynamic follows the text. Fixed keeps a stable right-aligned value field.',
+                subtitle: 'Dynamic follows the text. Fixed keeps a compact stable value field.',
                 model: widthModel,
             });
             widthGroup.add(row);

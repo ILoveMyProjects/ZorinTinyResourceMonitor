@@ -1,12 +1,12 @@
 {
   "schema": 1,
   "uuid": "tiny-resource-monitor@local",
-  "version": 6,
-  "version_name": "0.5.0",
+  "version": 7,
+  "version_name": "0.5.1",
   "shell_versions": [
     "46"
   ],
-  "download_url": "https://github.com/ILoveMyProjects/ZorinTinyResourceMonitor/releases/download/v0.5.0/tiny-resource-monitor@local-v0.5.0.zip",
+  "download_url": "https://github.com/ILoveMyProjects/ZorinTinyResourceMonitor/releases/download/v0.5.1/tiny-resource-monitor@local-v0.5.1.zip",
   "sha256": "REPLACE_WITH_64_HEX_SHA256",
   "changelog": [
     "Independent per-item panel placement.",

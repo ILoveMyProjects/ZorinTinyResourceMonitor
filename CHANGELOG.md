@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.1
+
+- Grouped items sharing a placement slot inside a single panel indicator to remove duplicate GNOME Shell padding.
+- Reduced fixed Download/Upload value width from 96 px to 78 px for a more compact top bar.
+- Retained independent Dynamic / Fixed width modes for Download and Upload.
+- Reworked per-part color assignment to inline `St.Label` CSS so each label/value/arrow follows its own configured color key.
+- Fixed Download arrow color assignment together with CPU/RAM and Upload color mappings.
+
 ## 0.5.0
 
 - Added independent placement for CPU, RAM, Download and Upload instead of moving the monitor as one block.
