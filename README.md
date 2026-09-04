@@ -15,6 +15,33 @@ Right-click the monitor to open one native GNOME preferences window. The window 
 - **Update** — update source, version check, changelog and installation.
 - **About** — extension version, GNOME target and update-security notes.
 
+
+## Quick install
+
+Install the latest published release with one command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ILoveMyProjects/ZorinTinyResourceMonitor/master/install-latest.sh | bash
+```
+
+The installer reads the current `update.json`, verifies the extension UUID, GNOME Shell compatibility, release ZIP URL and SHA-256 checksum, validates the ZIP metadata, and then installs it with `gnome-extensions install --force`.
+
+On Wayland, log out and log back in after the first installation. Then, if necessary, enable the extension:
+
+```bash
+gnome-extensions enable tiny-resource-monitor@local
+```
+
+If you prefer to inspect the installer before running it:
+
+```bash
+curl -fLo install-latest.sh https://raw.githubusercontent.com/ILoveMyProjects/ZorinTinyResourceMonitor/master/install-latest.sh
+less install-latest.sh
+bash install-latest.sh
+```
+
+After the first installation, later releases can be installed from **Right click → Update → Check for updates → Update**.
+
 ## Customize
 
 ### Visibility

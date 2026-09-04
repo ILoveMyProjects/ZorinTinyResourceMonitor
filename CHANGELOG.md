@@ -2,6 +2,11 @@
 
 - Documentation/config examples now use the canonical GitHub repository `ILoveMyProjects/ZorinTinyResourceMonitor`.
 
+## Unreleased
+
+- Added a repository-level `install-latest.sh` bootstrap installer for the latest GitHub Release.
+- Updated GitHub Actions checkout from `actions/checkout@v4` to `actions/checkout@v6`.
+
 ## 0.4.0
 
 - Added a Customize page to the existing right-click preferences window.
