@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.tiny-resource-monitor" path="/org/gnome/shell/extensions/tiny-resource-monitor/">
+    <key name="interface-priority" type="as">
+      <default>[]</default>
+      <summary>Network interface priority</summary>
+      <description>Ordered network interfaces. The first active interface is used for throughput display.</description>
+    </key>
+    <key name="update-manifest-url" type="s">
+      <default>''</default>
+      <summary>Update manifest URL</summary>
+      <description>HTTPS URL to update.json. GitHub Actions injects the repository-specific URL into release bundles.</description>
+    </key>
+  </schema>
+</schemalist>

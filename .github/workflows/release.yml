@@ -1,0 +1,141 @@
+name: Build release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate tag and prepare release bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import xml.etree.ElementTree as ET
+
+          root = pathlib.Path('.')
+          metadata = json.loads((root / 'metadata.json').read_text())
+          version = metadata.get('version')
+          version_name = metadata.get('version-name')
+          uuid = metadata.get('uuid')
+          tag = os.environ['GITHUB_REF_NAME']
+
+          if not isinstance(version, int) or version < 1:
+              raise SystemExit('metadata.json: version must be a positive integer')
+          if not version_name or tag != f'v{version_name}':
+              raise SystemExit(f'Tag {tag!r} must equal v{version_name}')
+          if uuid != 'tiny-resource-monitor@local':
+              raise SystemExit(f'Unexpected UUID: {uuid!r}')
+
+          repo = os.environ['GITHUB_REPOSITORY']
+          branch = os.environ['DEFAULT_BRANCH']
+          manifest_url = f'https://raw.githubusercontent.com/{repo}/{branch}/update.json'
+
+          schema_path = root / 'schemas' / 'org.gnome.shell.extensions.tiny-resource-monitor.gschema.xml'
+          tree = ET.parse(schema_path)
+          key = next((node for node in tree.getroot().iter('key')
+                      if node.attrib.get('name') == 'update-manifest-url'), None)
+          if key is None or key.find('default') is None:
+              raise SystemExit('update-manifest-url schema key is missing')
+          key.find('default').text = repr(manifest_url)
+          tree.write(schema_path, encoding='UTF-8', xml_declaration=True)
+
+          pathlib.Path('/tmp/release-meta.json').write_text(json.dumps({
+              'version': version,
+              'version_name': version_name,
+              'uuid': uuid,
+              'repo': repo,
+              'tag': tag,
+          }))
+          PY
+
+          VERSION_NAME="$(python3 -c 'import json; print(json.load(open("/tmp/release-meta.json"))["version_name"])')"
+          ZIP="tiny-resource-monitor@local-v${VERSION_NAME}.zip"
+          rm -f "$ZIP"
+          zip -9r "$ZIP" \
+            extension.js \
+            prefs.js \
+            metadata.json \
+            schemas/org.gnome.shell.extensions.tiny-resource-monitor.gschema.xml
+          echo "ZIP=$ZIP" >> "$GITHUB_ENV"
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+
+      - name: Build update manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+
+          release = json.loads(pathlib.Path('/tmp/release-meta.json').read_text())
+          package = pathlib.Path(os.environ['ZIP'])
+          digest = hashlib.sha256(package.read_bytes()).hexdigest()
+
+          notes = []
+          for raw in pathlib.Path('RELEASE_NOTES.md').read_text().splitlines():
+              line = raw.strip()
+              if not line or line.startswith('#'):
+                  continue
+              if line.startswith(('- ', '* ')):
+                  line = line[2:].strip()
+              notes.append(line)
+
+          manifest = {
+              'schema': 1,
+              'uuid': release['uuid'],
+              'version': release['version'],
+              'version_name': release['version_name'],
+              'shell_versions': ['46'],
+              'download_url': f"https://github.com/{release['repo']}/releases/download/{release['tag']}/{package.name}",
+              'sha256': digest,
+              'changelog': notes[:20],
+          }
+          pathlib.Path('/tmp/update.json').write_text(
+              json.dumps(manifest, indent=2, ensure_ascii=False) + '\n'
+          )
+          PY
+
+      - name: Create GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" "$ZIP" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file RELEASE_NOTES.md
+
+      - name: Publish stable update.json on default branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          BRANCH="${{ github.event.repository.default_branch }}"
+          git fetch origin "$BRANCH"
+          git checkout -B "$BRANCH" "origin/$BRANCH"
+          cp /tmp/update.json update.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add update.json
+          if ! git diff --cached --quiet; then
+            git commit -m "Update release manifest to $GITHUB_REF_NAME"
+            git push origin "HEAD:$BRANCH"
+          fi
