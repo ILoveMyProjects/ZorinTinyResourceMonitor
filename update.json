@@ -1,13 +1,13 @@
 {
   "schema": 1,
   "uuid": "tiny-resource-monitor@local",
-  "version": 4,
-  "version_name": "0.4.0",
+  "version": 5,
+  "version_name": "0.4.1",
   "shell_versions": [
     "46"
   ],
-  "download_url": "https://github.com/ILoveMyProjects/ZorinTinyResourceMonitor/releases/download/v0.4.0/tiny-resource-monitor@local-v0.4.0.zip",
-  "sha256": "b4a2e0812b8e293d0e9a883dcddd50f7d0d5050379666a73012265cdf78dd67a",
+  "download_url": "https://github.com/ILoveMyProjects/ZorinTinyResourceMonitor/releases/download/v0.4.1/tiny-resource-monitor@local-v0.4.1.zip",
+  "sha256": "be32b690f4b88085cb6bd3d64d01efe4476c7020d48536f0356bbfd15c2929f0",
   "changelog": [
     "Added a Customize page to the existing right-click preferences window.",
     "Added Left / Center / Right panel placement with live changes.",
