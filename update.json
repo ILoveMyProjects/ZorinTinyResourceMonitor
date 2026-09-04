@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "uuid": "tiny-resource-monitor@local",
+  "version": 4,
+  "version_name": "0.4.0",
+  "shell_versions": ["46"],
+  "download_url": "https://github.com/ILoveMyProjects/ZorinTinyResourceMonitor/releases/download/v0.4.0/tiny-resource-monitor@local-v0.4.0.zip",
+  "sha256": "REPLACE_WITH_64_HEX_SHA256",
+  "changelog": [
+    "Added a Customize page with panel placement, visibility, ordering and colors.",
+    "Changed the default panel location to Left.",
+    "Converted the preferences UI to English."
+  ]
+}

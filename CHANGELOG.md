@@ -1,5 +1,19 @@
 # Changelog
 
+- Documentation/config examples now use the canonical GitHub repository `ILoveMyProjects/ZorinTinyResourceMonitor`.
+
+## 0.4.0
+
+- Added a Customize page to the existing right-click preferences window.
+- Added Left / Center / Right panel placement using GNOME Shell's status-area API.
+- Added a Network master switch plus independent CPU, RAM, Download and Upload visibility controls.
+- Added user-controlled left-to-right ordering for CPU, RAM, Download and Upload.
+- Added independent colors for CPU label/value, RAM label/value, download arrow/value and upload arrow/value.
+- Added per-color and global reset controls that return text to the GNOME panel theme color.
+- Changed the default monitor location from Right to Left.
+- Kept a tiny ellipsis right-click target if every display item is hidden, so preferences remain reachable.
+- Converted the preferences UI and updater messages to English.
+
 ## 0.3.0
 
 - Split the existing native preferences window into Network, Update and About pages.

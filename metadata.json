@@ -1,11 +1,11 @@
 {
   "uuid": "tiny-resource-monitor@local",
   "name": "Tiny Resource Monitor",
-  "description": "Minimal GNOME 46 top-bar monitor for CPU, RAM and prioritized network throughput.",
+  "description": "Customizable GNOME 46 top-bar monitor for CPU, RAM and prioritized network throughput.",
   "shell-version": [
     "46"
   ],
-  "version": 3,
-  "version-name": "0.3.0",
+  "version": 4,
+  "version-name": "0.4.0",
   "settings-schema": "org.gnome.shell.extensions.tiny-resource-monitor"
 }

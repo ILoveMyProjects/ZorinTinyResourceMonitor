@@ -13,6 +13,9 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 
 const UPDATE_INTERVAL_SECONDS = 1;
+const DISPLAY_ITEMS = ['cpu', 'ram', 'download', 'upload'];
+const PANEL_AREAS = new Set(['left', 'center', 'right']);
+const COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
 let decoder = null;
 
 function readText(path) {
@@ -159,8 +162,6 @@ function isInterfaceActive(iface) {
         if (operstate !== 'up')
             return false;
 
-        // Physical interfaces expose carrier. If it disappears during a device
-        // hot-unplug, consider the interface inactive instead of throwing.
         try {
             return readText(`/sys/class/net/${iface}/carrier`).trim() === '1';
         } catch {
@@ -177,7 +178,6 @@ function readNetworkCounters(iface) {
 
     const base = `/sys/class/net/${iface}/statistics`;
 
-    // An interface may disappear between selection and reading sysfs.
     try {
         return {
             rx: BigInt(readText(`${base}/rx_bytes`).trim()),
@@ -191,7 +191,6 @@ function readNetworkCounters(iface) {
 function selectNetworkInterface(settings) {
     const priority = settings.get_strv('interface-priority');
 
-    // A configured list is authoritative: use the first active interface.
     if (priority.length > 0) {
         for (const iface of priority) {
             if (isInterfaceActive(iface))
@@ -200,8 +199,6 @@ function selectNetworkInterface(settings) {
         return null;
     }
 
-    // Before the user configures priorities, retain the old behaviour and use
-    // the active default-route interface so the extension works immediately.
     const fallback = readDefaultInterface();
     return fallback && isInterfaceActive(fallback) ? fallback : null;
 }
@@ -220,45 +217,76 @@ function formatRate(bytesPerSecond) {
     return `${(bytesPerSecond / 1_000_000_000).toFixed(1)} GB/s`;
 }
 
+function getDisplayOrder(settings) {
+    const configured = settings.get_strv('display-order');
+    const order = [];
+    const seen = new Set();
+
+    for (const item of configured) {
+        if (DISPLAY_ITEMS.includes(item) && !seen.has(item)) {
+            order.push(item);
+            seen.add(item);
+        }
+    }
+
+    for (const item of DISPLAY_ITEMS) {
+        if (!seen.has(item))
+            order.push(item);
+    }
+
+    return order;
+}
+
+function getPanelArea(settings) {
+    const value = settings.get_string('panel-location');
+    return PANEL_AREAS.has(value) ? value : 'right';
+}
+
+function getColor(settings, key) {
+    const value = settings.get_string(key).trim();
+    return COLOR_PATTERN.test(value) ? value : null;
+}
+
+function span(text, color) {
+    return color ? `<span foreground="${color}">${text}</span>` : text;
+}
+
+function metricMarkup(title, value, titleColor, valueColor) {
+    return `${span(title, titleColor)} ${span(value, valueColor)}`;
+}
+
 export default class TinyResourceMonitorExtension extends Extension {
     enable() {
         decoder = new TextDecoder('utf-8');
         this._settings = this.getSettings();
-
-        this._indicator = new PanelMenu.Button(0.0, this.metadata.name, true);
-        this._label = new St.Label({
-            text: 'CPU -- | RAM --',
-            y_align: Clutter.ActorAlign.CENTER,
-        });
-        this._indicator.add_child(this._label);
-
-        // Right click opens the preferences window.
-        this._indicator.connect('button-press-event', (_actor, event) => {
-            if (event.get_button() === 3) {
-                this.openPreferences();
-                return true;
-            }
-            return false;
-        });
-
-        // Put the monitor in the right side of the top panel.
-        Main.panel.addToStatusArea(this.uuid, this._indicator, 0, 'right');
-
         this._previousCpu = null;
         this._previousNetwork = null;
         this._previousTimestamp = null;
         this._lastLoggedError = null;
 
-        this._settingsChangedId = this._settings.connect(
-            'changed::interface-priority',
-            () => {
+        this._settingsChangedId = this._settings.connect('changed', (_settings, key) => {
+            if (
+                key === 'interface-priority' ||
+                key === 'show-network' ||
+                key === 'show-download' ||
+                key === 'show-upload'
+            ) {
                 this._previousNetwork = null;
                 this._previousTimestamp = null;
-                this._update();
             }
-        );
 
+            if (key === 'show-cpu')
+                this._previousCpu = null;
+
+            if (key === 'panel-location')
+                this._rebuildIndicator();
+
+            this._update();
+        });
+
+        this._buildIndicator();
         this._update();
+
         this._timeoutId = GLib.timeout_add_seconds(
             GLib.PRIORITY_DEFAULT,
             UPDATE_INTERVAL_SECONDS,
@@ -269,55 +297,139 @@ export default class TinyResourceMonitorExtension extends Extension {
         );
     }
 
+    _buildIndicator() {
+        this._indicator = new PanelMenu.Button(0.0, this.metadata.name, true);
+        this._label = new St.Label({
+            text: 'CPU -- | RAM --',
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        this._indicator.add_child(this._label);
+
+        // Right click always opens the same native preferences window.
+        this._indicator.connect('button-press-event', (_actor, event) => {
+            if (event.get_button() === 3) {
+                this.openPreferences();
+                return true;
+            }
+            return false;
+        });
+
+        Main.panel.addToStatusArea(
+            this.uuid,
+            this._indicator,
+            0,
+            getPanelArea(this._settings)
+        );
+    }
+
+    _rebuildIndicator() {
+        this._indicator?.destroy();
+        this._indicator = null;
+        this._label = null;
+        this._buildIndicator();
+    }
+
     _update() {
+        if (!this._label || !this._settings)
+            return;
+
         try {
             const now = GLib.get_monotonic_time();
+            const showCpu = this._settings.get_boolean('show-cpu');
+            const showRam = this._settings.get_boolean('show-ram');
+            const showNetwork = this._settings.get_boolean('show-network');
+            const showDownload = this._settings.get_boolean('show-download');
+            const showUpload = this._settings.get_boolean('show-upload');
+            const networkNeeded = showNetwork && (showDownload || showUpload);
 
-            const cpu = readCpuSample();
-            const cpuPercent = calculateCpuPercent(this._previousCpu, cpu);
-            this._previousCpu = cpu;
+            let cpuText = '--';
+            if (showCpu) {
+                const cpu = readCpuSample();
+                const cpuPercent = calculateCpuPercent(this._previousCpu, cpu);
+                this._previousCpu = cpu;
+                cpuText = cpuPercent === null ? '--' : `${Math.round(cpuPercent)}%`;
+            } else {
+                this._previousCpu = null;
+            }
 
-            const memoryPercent = readMemoryPercent();
-            const iface = selectNetworkInterface(this._settings);
-            const counters = iface ? readNetworkCounters(iface) : null;
+            let ramText = '--';
+            if (showRam)
+                ramText = `${Math.round(readMemoryPercent())}%`;
 
+            let iface = null;
             let rxRate = 0;
             let txRate = 0;
 
-            if (
-                counters &&
-                this._previousNetwork &&
-                this._previousNetwork.iface === iface &&
-                this._previousTimestamp !== null
-            ) {
-                const seconds = (now - this._previousTimestamp) / 1_000_000;
+            if (networkNeeded) {
+                iface = selectNetworkInterface(this._settings);
+                const counters = iface ? readNetworkCounters(iface) : null;
 
-                if (seconds > 0) {
-                    const rxDelta = counters.rx >= this._previousNetwork.rx
-                        ? counters.rx - this._previousNetwork.rx
-                        : 0n;
-                    const txDelta = counters.tx >= this._previousNetwork.tx
-                        ? counters.tx - this._previousNetwork.tx
-                        : 0n;
+                if (
+                    counters &&
+                    this._previousNetwork &&
+                    this._previousNetwork.iface === iface &&
+                    this._previousTimestamp !== null
+                ) {
+                    const seconds = (now - this._previousTimestamp) / 1_000_000;
 
-                    rxRate = Number(rxDelta) / seconds;
-                    txRate = Number(txDelta) / seconds;
+                    if (seconds > 0) {
+                        const rxDelta = counters.rx >= this._previousNetwork.rx
+                            ? counters.rx - this._previousNetwork.rx
+                            : 0n;
+                        const txDelta = counters.tx >= this._previousNetwork.tx
+                            ? counters.tx - this._previousNetwork.tx
+                            : 0n;
+
+                        rxRate = Number(rxDelta) / seconds;
+                        txRate = Number(txDelta) / seconds;
+                    }
                 }
+
+                this._previousNetwork = counters ? {iface, ...counters} : null;
+                this._previousTimestamp = now;
+            } else {
+                this._previousNetwork = null;
+                this._previousTimestamp = null;
             }
 
-            this._previousNetwork = counters ? {iface, ...counters} : null;
-            this._previousTimestamp = now;
+            const colors = {
+                cpuTitle: getColor(this._settings, 'cpu-title-color'),
+                cpuValue: getColor(this._settings, 'cpu-value-color'),
+                ramTitle: getColor(this._settings, 'ram-title-color'),
+                ramValue: getColor(this._settings, 'ram-value-color'),
+                downloadTitle: getColor(this._settings, 'download-title-color'),
+                downloadValue: getColor(this._settings, 'download-value-color'),
+                uploadTitle: getColor(this._settings, 'upload-title-color'),
+                uploadValue: getColor(this._settings, 'upload-value-color'),
+            };
 
-            const cpuText = cpuPercent === null ? '--' : `${Math.round(cpuPercent)}%`;
-            const ramText = `${Math.round(memoryPercent)}%`;
-            const networkText = iface
-                ? ` | ↓ ${formatRate(rxRate)} ↑ ${formatRate(txRate)}`
-                : '';
+            const items = {
+                cpu: showCpu
+                    ? metricMarkup('CPU', cpuText, colors.cpuTitle, colors.cpuValue)
+                    : null,
+                ram: showRam
+                    ? metricMarkup('RAM', ramText, colors.ramTitle, colors.ramValue)
+                    : null,
+                download: networkNeeded && iface && showDownload
+                    ? metricMarkup('↓', formatRate(rxRate), colors.downloadTitle, colors.downloadValue)
+                    : null,
+                upload: networkNeeded && iface && showUpload
+                    ? metricMarkup('↑', formatRate(txRate), colors.uploadTitle, colors.uploadValue)
+                    : null,
+            };
 
-            this._label.text = `CPU ${cpuText} | RAM ${ramText}${networkText}`;
+            const parts = [];
+            for (const item of getDisplayOrder(this._settings)) {
+                if (items[item])
+                    parts.push(items[item]);
+            }
+
+            // Keep a tiny right-click target if the user hides every item.
+            // It contains no resource data and prevents locking the user out of prefs.
+            this._label.clutter_text.set_markup(parts.length > 0 ? parts.join(' | ') : '⋯');
             this._lastLoggedError = null;
         } catch (error) {
-            this._label.text = 'CPU -- | RAM --';
+            this._label.text = '⋯';
 
             const message = error instanceof Error ? error.message : String(error);
             if (message !== this._lastLoggedError) {

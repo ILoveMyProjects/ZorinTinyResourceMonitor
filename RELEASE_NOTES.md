@@ -1,7 +1,10 @@
-# 0.3.0
+# 0.4.0
 
-- Preferences window split into Network, Update and About pages.
-- Added manual update checker with changelog display.
-- Added SHA-256 verification before installation.
-- Added GNOME Shell 46 and UUID validation for update manifests.
-- GitHub release workflow can inject the update source automatically.
+- Added a Customize page to the existing right-click preferences window.
+- Added Left / Center / Right panel placement with live changes.
+- Added independent visibility controls for CPU, RAM, Network, Download and Upload.
+- Added user-defined left-to-right ordering for CPU, RAM, Download and Upload.
+- Added separate colors for CPU label/value, RAM label/value, download arrow/value and upload arrow/value.
+- Added reset-to-panel-theme color controls.
+- Changed the default panel location to Left.
+- Converted all preferences, update messages and documentation to English.

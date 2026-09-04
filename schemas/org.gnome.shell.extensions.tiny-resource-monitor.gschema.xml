@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+<?xml version='1.0' encoding='UTF-8'?>
 <schemalist>
   <schema id="org.gnome.shell.extensions.tiny-resource-monitor" path="/org/gnome/shell/extensions/tiny-resource-monitor/">
     <key name="interface-priority" type="as">
@@ -6,6 +6,86 @@
       <summary>Network interface priority</summary>
       <description>Ordered network interfaces. The first active interface is used for throughput display.</description>
     </key>
+
+    <key name="panel-location" type="s">
+      <default>'left'</default>
+      <summary>Panel location</summary>
+      <description>GNOME panel area used by the monitor: left, center or right.</description>
+    </key>
+
+    <key name="display-order" type="as">
+      <default>['cpu', 'ram', 'download', 'upload']</default>
+      <summary>Display order</summary>
+      <description>Left-to-right order of monitor items.</description>
+    </key>
+
+    <key name="show-cpu" type="b">
+      <default>true</default>
+      <summary>Show CPU</summary>
+      <description>Show CPU usage in the top bar.</description>
+    </key>
+    <key name="show-ram" type="b">
+      <default>true</default>
+      <summary>Show RAM</summary>
+      <description>Show RAM usage in the top bar.</description>
+    </key>
+    <key name="show-network" type="b">
+      <default>true</default>
+      <summary>Show network</summary>
+      <description>Master switch for network throughput items.</description>
+    </key>
+    <key name="show-download" type="b">
+      <default>true</default>
+      <summary>Show download</summary>
+      <description>Show the download arrow and current download speed.</description>
+    </key>
+    <key name="show-upload" type="b">
+      <default>true</default>
+      <summary>Show upload</summary>
+      <description>Show the upload arrow and current upload speed.</description>
+    </key>
+
+    <key name="cpu-title-color" type="s">
+      <default>''</default>
+      <summary>CPU label color</summary>
+      <description>Hex RGB color for the CPU label. Empty means panel theme color.</description>
+    </key>
+    <key name="cpu-value-color" type="s">
+      <default>''</default>
+      <summary>CPU value color</summary>
+      <description>Hex RGB color for the CPU percentage. Empty means panel theme color.</description>
+    </key>
+    <key name="ram-title-color" type="s">
+      <default>''</default>
+      <summary>RAM label color</summary>
+      <description>Hex RGB color for the RAM label. Empty means panel theme color.</description>
+    </key>
+    <key name="ram-value-color" type="s">
+      <default>''</default>
+      <summary>RAM value color</summary>
+      <description>Hex RGB color for the RAM percentage. Empty means panel theme color.</description>
+    </key>
+    <key name="download-title-color" type="s">
+      <default>''</default>
+      <summary>Download arrow color</summary>
+      <description>Hex RGB color for the download arrow. Empty means panel theme color.</description>
+    </key>
+    <key name="download-value-color" type="s">
+      <default>''</default>
+      <summary>Download value color</summary>
+      <description>Hex RGB color for the download speed. Empty means panel theme color.</description>
+    </key>
+    <key name="upload-title-color" type="s">
+      <default>''</default>
+      <summary>Upload arrow color</summary>
+      <description>Hex RGB color for the upload arrow. Empty means panel theme color.</description>
+    </key>
+    <key name="upload-value-color" type="s">
+      <default>''</default>
+      <summary>Upload value color</summary>
+      <description>Hex RGB color for the upload speed. Empty means panel theme color.</description>
+    </key>
+
     <key name="update-manifest-url" type="s">
       <default>''</default>
       <summary>Update manifest URL</summary>

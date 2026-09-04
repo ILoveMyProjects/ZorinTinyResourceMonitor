@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import Adw from 'gi://Adw';
+import Gdk from 'gi://Gdk?version=4.0';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Gtk from 'gi://Gtk?version=4.0';
@@ -13,6 +14,29 @@ Gio._promisify(Gio.Subprocess.prototype, 'communicate_utf8_async');
 const decoder = new TextDecoder('utf-8');
 const MAX_MANIFEST_BYTES = 256 * 1024;
 const MAX_PACKAGE_BYTES = 20 * 1024 * 1024;
+const DISPLAY_ITEMS = ['cpu', 'ram', 'download', 'upload'];
+const DISPLAY_ITEM_DETAILS = {
+    cpu: ['CPU', 'CPU label and percentage'],
+    ram: ['RAM', 'RAM label and percentage'],
+    download: ['Download', 'Download arrow and current speed'],
+    upload: ['Upload', 'Upload arrow and current speed'],
+};
+const VISIBILITY_KEYS = {
+    cpu: 'show-cpu',
+    ram: 'show-ram',
+    download: 'show-download',
+    upload: 'show-upload',
+};
+const COLOR_KEYS = [
+    'cpu-title-color',
+    'cpu-value-color',
+    'ram-title-color',
+    'ram-value-color',
+    'download-title-color',
+    'download-value-color',
+    'upload-title-color',
+    'upload-value-color',
+];
 
 function readText(path) {
     try {
@@ -35,9 +59,9 @@ function describeInterface(name) {
         return 'Wi-Fi';
 
     if (exists(`${base}/device`))
-        return 'Karta przewodowa / fizyczna';
+        return 'Wired / physical adapter';
 
-    return 'Inny interfejs';
+    return 'Other interface';
 }
 
 function isInterfaceActive(name) {
@@ -70,8 +94,7 @@ function detectPhysicalInterfaces() {
 
             const base = `/sys/class/net/${name}`;
 
-            // Keep actual hardware-backed network interfaces. This excludes
-            // common bridges, Docker/veth devices and VPN/tunnel interfaces.
+            // Keep hardware-backed interfaces and skip common virtual devices.
             if (!exists(`${base}/device`) && !exists(`${base}/wireless`))
                 continue;
 
@@ -99,7 +122,6 @@ function mergePriority(savedPriority, detected) {
     const priority = [];
     const seen = new Set();
 
-    // Preserve the user's order, including temporarily disconnected adapters.
     for (const name of savedPriority) {
         if (!name || name === 'lo' || name.includes('/') || seen.has(name))
             continue;
@@ -107,7 +129,6 @@ function mergePriority(savedPriority, detected) {
         seen.add(name);
     }
 
-    // Newly detected cards are appended without changing existing priorities.
     for (const {name} of detected) {
         if (!seen.has(name)) {
             priority.push(name);
@@ -116,6 +137,25 @@ function mergePriority(savedPriority, detected) {
     }
 
     return priority;
+}
+
+function normalizeDisplayOrder(savedOrder) {
+    const order = [];
+    const seen = new Set();
+
+    for (const item of savedOrder) {
+        if (DISPLAY_ITEMS.includes(item) && !seen.has(item)) {
+            order.push(item);
+            seen.add(item);
+        }
+    }
+
+    for (const item of DISPLAY_ITEMS) {
+        if (!seen.has(item))
+            order.push(item);
+    }
+
+    return order;
 }
 
 function isHttpsUrl(value) {
@@ -130,17 +170,20 @@ function isHttpsUrl(value) {
 function fetchBytes(session, url, maxBytes) {
     return new Promise((resolve, reject) => {
         if (!isHttpsUrl(url)) {
-            reject(new Error('Adres musi używać HTTPS.'));
+            reject(new Error('The address must use HTTPS.'));
             return;
         }
 
         const message = Soup.Message.new('GET', url);
         if (!message) {
-            reject(new Error('Nie można utworzyć żądania HTTP.'));
+            reject(new Error('Could not create the HTTP request.'));
             return;
         }
 
-        message.get_request_headers().append('Accept', 'application/json, application/zip, application/octet-stream;q=0.9, */*;q=0.1');
+        message.get_request_headers().append(
+            'Accept',
+            'application/json, application/zip, application/octet-stream;q=0.9, */*;q=0.1'
+        );
 
         session.send_and_read_async(
             message,
@@ -152,13 +195,13 @@ function fetchBytes(session, url, maxBytes) {
                     const status = message.get_status();
 
                     if (status < 200 || status >= 300)
-                        throw new Error(`Serwer zwrócił HTTP ${status}.`);
+                        throw new Error(`The server returned HTTP ${status}.`);
 
                     const data = bytes.get_data();
                     if (!data)
-                        throw new Error('Serwer zwrócił pustą odpowiedź.');
+                        throw new Error('The server returned an empty response.');
                     if (data.length > maxBytes)
-                        throw new Error('Pobrany plik przekracza dozwolony rozmiar.');
+                        throw new Error('The downloaded file is larger than the allowed limit.');
 
                     resolve(data);
                 } catch (error) {
@@ -183,28 +226,28 @@ function normalizeChangelog(value) {
 
 function validateManifest(raw, uuid) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw))
-        throw new Error('Nieprawidłowy format update.json.');
+        throw new Error('Invalid update.json format.');
 
     if (raw.schema !== 1)
-        throw new Error('Nieobsługiwana wersja formatu update.json.');
+        throw new Error('Unsupported update.json schema version.');
 
     if (raw.uuid !== uuid)
-        throw new Error(`Manifest dotyczy innego rozszerzenia (${raw.uuid ?? 'brak UUID'}).`);
+        throw new Error(`The manifest belongs to another extension (${raw.uuid ?? 'missing UUID'}).`);
 
     if (!Number.isInteger(raw.version) || raw.version < 1)
-        throw new Error('Manifest ma nieprawidłowy numer wersji.');
+        throw new Error('The manifest contains an invalid version number.');
 
     if (typeof raw.version_name !== 'string' || !raw.version_name.trim())
-        throw new Error('Manifest nie zawiera poprawnego version_name.');
+        throw new Error('The manifest does not contain a valid version_name.');
 
     if (!Array.isArray(raw.shell_versions) || !raw.shell_versions.includes('46'))
-        throw new Error('Ta aktualizacja nie deklaruje obsługi GNOME Shell 46.');
+        throw new Error('This update does not declare GNOME Shell 46 compatibility.');
 
     if (!isHttpsUrl(raw.download_url))
-        throw new Error('Adres paczki aktualizacji nie jest poprawnym adresem HTTPS.');
+        throw new Error('The update package URL is not a valid HTTPS address.');
 
     if (typeof raw.sha256 !== 'string' || !/^[a-fA-F0-9]{64}$/.test(raw.sha256))
-        throw new Error('Manifest nie zawiera poprawnej sumy SHA-256.');
+        throw new Error('The manifest does not contain a valid SHA-256 checksum.');
 
     return {
         schema: 1,
@@ -221,7 +264,7 @@ function validateManifest(raw, uuid) {
 async function installPackage(bytes, manifest, uuid) {
     const digest = GLib.compute_checksum_for_data(GLib.ChecksumType.SHA256, bytes);
     if (!digest || digest.toLowerCase() !== manifest.sha256)
-        throw new Error('SHA-256 pobranej paczki nie zgadza się z manifestem. Nic nie zostało zainstalowane.');
+        throw new Error('The downloaded package failed SHA-256 verification. Nothing was installed.');
 
     const tempPath = GLib.build_filenamev([
         GLib.get_tmp_dir(),
@@ -246,7 +289,7 @@ async function installPackage(bytes, manifest, uuid) {
         const [, stderr] = await proc.communicate_utf8_async(null, null);
         if (!proc.get_successful()) {
             const detail = stderr?.trim();
-            throw new Error(detail || `gnome-extensions zakończył się kodem ${proc.get_exit_status()}.`);
+            throw new Error(detail || `gnome-extensions exited with code ${proc.get_exit_status()}.`);
         }
     } finally {
         try {
@@ -257,16 +300,258 @@ async function installPackage(bytes, manifest, uuid) {
     }
 }
 
+function rgbaFromString(value) {
+    const rgba = new Gdk.RGBA();
+    if (!value || !rgba.parse(value))
+        rgba.parse('#FFFFFF');
+    return rgba;
+}
+
+function rgbaToHex(rgba) {
+    const channel = value => Math.max(0, Math.min(255, Math.round(value * 255)))
+        .toString(16)
+        .padStart(2, '0');
+
+    return `#${channel(rgba.red)}${channel(rgba.green)}${channel(rgba.blue)}`.toUpperCase();
+}
+
+function addColorRow(group, settings, key, title, subtitle) {
+    const row = new Adw.ActionRow({
+        title,
+        subtitle,
+    });
+
+    const dialog = new Gtk.ColorDialog({
+        title: `Choose ${title.toLowerCase()}`,
+        with_alpha: false,
+    });
+    const button = new Gtk.ColorDialogButton({
+        dialog,
+        valign: Gtk.Align.CENTER,
+    });
+    const resetButton = new Gtk.Button({
+        icon_name: 'edit-undo-symbolic',
+        tooltip_text: 'Use panel theme color',
+        valign: Gtk.Align.CENTER,
+    });
+    resetButton.add_css_class('flat');
+
+    let syncing = false;
+    const sync = () => {
+        const configured = settings.get_string(key).trim();
+        row.subtitle = configured
+            ? `${subtitle} • ${configured.toUpperCase()}`
+            : `${subtitle} • Panel theme color`;
+
+        syncing = true;
+        button.set_rgba(rgbaFromString(configured));
+        syncing = false;
+    };
+
+    button.connect('notify::rgba', () => {
+        if (syncing)
+            return;
+        settings.set_string(key, rgbaToHex(button.get_rgba()));
+    });
+
+    resetButton.connect('clicked', () => {
+        settings.set_string(key, '');
+    });
+
+    settings.connect(`changed::${key}`, sync);
+    row.add_suffix(button);
+    row.add_suffix(resetButton);
+    group.add(row);
+    sync();
+}
+
 export default class TinyResourceMonitorPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         const settings = this.getSettings();
         window._settings = settings;
-        window.set_default_size(680, 600);
+        window.set_default_size(760, 700);
         window.search_enabled = false;
 
+        this._buildCustomizePage(window, settings);
         this._buildNetworkPage(window, settings);
         this._buildUpdatePage(window, settings);
         this._buildAboutPage(window);
+    }
+
+    _buildCustomizePage(window, settings) {
+        const page = new Adw.PreferencesPage({
+            title: 'Customize',
+            icon_name: 'preferences-system-symbolic',
+        });
+        window.add(page);
+
+        const placementGroup = new Adw.PreferencesGroup({
+            title: 'Panel placement',
+            description: 'Choose which GNOME top-panel area contains the monitor. Changes apply immediately.',
+        });
+        page.add(placementGroup);
+
+        const locationModel = new Gtk.StringList();
+        locationModel.append('Left');
+        locationModel.append('Center');
+        locationModel.append('Right');
+
+        const locationRow = new Adw.ComboRow({
+            title: 'Panel area',
+            subtitle: 'Move the whole monitor to the left, center or right section.',
+            model: locationModel,
+        });
+        placementGroup.add(locationRow);
+
+        const locations = ['left', 'center', 'right'];
+        const currentLocation = settings.get_string('panel-location');
+        const currentIndex = locations.indexOf(currentLocation);
+        locationRow.selected = currentIndex >= 0 ? currentIndex : 0;
+        locationRow.connect('notify::selected', () => {
+            const value = locations[locationRow.selected] ?? 'left';
+            settings.set_string('panel-location', value);
+        });
+        settings.connect('changed::panel-location', () => {
+            const index = locations.indexOf(settings.get_string('panel-location'));
+            if (index >= 0 && locationRow.selected !== index)
+                locationRow.selected = index;
+        });
+
+        const networkGroup = new Adw.PreferencesGroup({
+            title: 'Network display',
+            description: 'This master switch controls the network section without changing your Download/Upload choices.',
+        });
+        page.add(networkGroup);
+
+        const networkRow = new Adw.ActionRow({
+            title: 'Network',
+            subtitle: 'Show network throughput when a prioritized interface is active.',
+        });
+        const networkSwitch = new Gtk.Switch({
+            valign: Gtk.Align.CENTER,
+        });
+        networkRow.add_suffix(networkSwitch);
+        networkRow.activatable_widget = networkSwitch;
+        networkGroup.add(networkRow);
+        settings.bind('show-network', networkSwitch, 'active', Gio.SettingsBindFlags.DEFAULT);
+
+        const itemsGroup = new Adw.PreferencesGroup({
+            title: 'Panel items',
+            description: 'Turn individual items on or off and use the arrows to choose their left-to-right order.',
+        });
+        page.add(itemsGroup);
+
+        let order = normalizeDisplayOrder(settings.get_strv('display-order'));
+        let rows = [];
+        const itemSwitches = new Map();
+
+        const saveOrder = () => settings.set_strv('display-order', order);
+
+        const clearRows = () => {
+            for (const row of rows)
+                itemsGroup.remove(row);
+            rows = [];
+            itemSwitches.clear();
+        };
+
+        const updateNetworkSensitivity = () => {
+            const enabled = settings.get_boolean('show-network');
+            itemSwitches.get('download')?.set_sensitive(enabled);
+            itemSwitches.get('upload')?.set_sensitive(enabled);
+        };
+
+        const renderItems = () => {
+            clearRows();
+
+            order.forEach((item, index) => {
+                const [title, subtitle] = DISPLAY_ITEM_DETAILS[item];
+                const row = new Adw.ActionRow({
+                    title: `${index + 1}. ${title}`,
+                    subtitle,
+                });
+
+                const visibilitySwitch = new Gtk.Switch({
+                    valign: Gtk.Align.CENTER,
+                });
+                settings.bind(
+                    VISIBILITY_KEYS[item],
+                    visibilitySwitch,
+                    'active',
+                    Gio.SettingsBindFlags.DEFAULT
+                );
+                row.activatable_widget = visibilitySwitch;
+                itemSwitches.set(item, visibilitySwitch);
+
+                const upButton = new Gtk.Button({
+                    icon_name: 'go-up-symbolic',
+                    tooltip_text: 'Move earlier',
+                    valign: Gtk.Align.CENTER,
+                    sensitive: index > 0,
+                });
+                upButton.add_css_class('flat');
+                upButton.connect('clicked', () => {
+                    if (index <= 0)
+                        return;
+                    [order[index - 1], order[index]] = [order[index], order[index - 1]];
+                    saveOrder();
+                    renderItems();
+                });
+
+                const downButton = new Gtk.Button({
+                    icon_name: 'go-down-symbolic',
+                    tooltip_text: 'Move later',
+                    valign: Gtk.Align.CENTER,
+                    sensitive: index < order.length - 1,
+                });
+                downButton.add_css_class('flat');
+                downButton.connect('clicked', () => {
+                    if (index >= order.length - 1)
+                        return;
+                    [order[index], order[index + 1]] = [order[index + 1], order[index]];
+                    saveOrder();
+                    renderItems();
+                });
+
+                row.add_suffix(visibilitySwitch);
+                row.add_suffix(upButton);
+                row.add_suffix(downButton);
+                itemsGroup.add(row);
+                rows.push(row);
+            });
+
+            updateNetworkSensitivity();
+        };
+
+        settings.connect('changed::show-network', updateNetworkSensitivity);
+        saveOrder();
+        renderItems();
+
+        const colorsGroup = new Adw.PreferencesGroup({
+            title: 'Colors',
+            description: 'Label colors affect CPU/RAM text and the network arrows. Value colors affect percentages and transfer speeds.',
+        });
+        page.add(colorsGroup);
+
+        const resetColorsButton = new Gtk.Button({
+            label: 'Reset colors',
+            tooltip_text: 'Return every text color to the GNOME panel theme',
+            valign: Gtk.Align.CENTER,
+        });
+        resetColorsButton.add_css_class('flat');
+        resetColorsButton.connect('clicked', () => {
+            for (const key of COLOR_KEYS)
+                settings.set_string(key, '');
+        });
+        colorsGroup.set_header_suffix(resetColorsButton);
+
+        addColorRow(colorsGroup, settings, 'cpu-title-color', 'CPU label', 'Color of “CPU”');
+        addColorRow(colorsGroup, settings, 'cpu-value-color', 'CPU value', 'Color of the CPU percentage');
+        addColorRow(colorsGroup, settings, 'ram-title-color', 'RAM label', 'Color of “RAM”');
+        addColorRow(colorsGroup, settings, 'ram-value-color', 'RAM value', 'Color of the RAM percentage');
+        addColorRow(colorsGroup, settings, 'download-title-color', 'Download arrow', 'Color of “↓”');
+        addColorRow(colorsGroup, settings, 'download-value-color', 'Download value', 'Color of the download speed');
+        addColorRow(colorsGroup, settings, 'upload-title-color', 'Upload arrow', 'Color of “↑”');
+        addColorRow(colorsGroup, settings, 'upload-value-color', 'Upload value', 'Color of the upload speed');
     }
 
     _buildNetworkPage(window, settings) {
@@ -277,20 +562,20 @@ export default class TinyResourceMonitorPreferences extends ExtensionPreferences
         window.add(page);
 
         const infoGroup = new Adw.PreferencesGroup({
-            title: 'Priorytet kart sieciowych',
-            description: 'Monitor wybiera pierwszą aktywną kartę od góry. Jeśli żadna z zapisanych kart nie jest aktywna, transfer sieci znika z górnego paska.',
+            title: 'Interface priority',
+            description: 'The monitor uses the first active adapter from the list. If none is active, the network items disappear from the top bar.',
         });
         page.add(infoGroup);
 
         const group = new Adw.PreferencesGroup({
-            title: 'Wykryte karty',
-            description: 'Użyj strzałek, aby ustawić kolejność. Zmiana działa od razu.',
+            title: 'Detected adapters',
+            description: 'Use the arrows to set priority. Changes apply immediately.',
         });
         page.add(group);
 
         const refreshButton = new Gtk.Button({
             icon_name: 'view-refresh-symbolic',
-            tooltip_text: 'Wykryj karty ponownie',
+            tooltip_text: 'Detect adapters again',
             valign: Gtk.Align.CENTER,
         });
         refreshButton.add_css_class('flat');
@@ -316,8 +601,8 @@ export default class TinyResourceMonitorPreferences extends ExtensionPreferences
 
             if (priority.length === 0) {
                 const row = new Adw.ActionRow({
-                    title: 'Nie wykryto fizycznych kart sieciowych',
-                    subtitle: 'Kliknij przycisk odświeżania po podłączeniu karty.',
+                    title: 'No physical network adapters detected',
+                    subtitle: 'Connect an adapter and click the refresh button.',
                 });
                 group.add(row);
                 rows.push(row);
@@ -327,8 +612,8 @@ export default class TinyResourceMonitorPreferences extends ExtensionPreferences
             priority.forEach((name, index) => {
                 const details = detectedByName.get(name);
                 const subtitle = details
-                    ? `${details.kind} • ${details.active ? 'aktywna' : 'nieaktywna'}`
-                    : 'Obecnie niewykryta — pozycja zostanie zachowana';
+                    ? `${details.kind} • ${details.active ? 'Active' : 'Inactive'}`
+                    : 'Not currently detected — saved priority is preserved';
 
                 const row = new Adw.ActionRow({
                     title: `${index + 1}. ${name}`,
@@ -337,7 +622,7 @@ export default class TinyResourceMonitorPreferences extends ExtensionPreferences
 
                 const upButton = new Gtk.Button({
                     icon_name: 'go-up-symbolic',
-                    tooltip_text: 'Wyższy priorytet',
+                    tooltip_text: 'Higher priority',
                     valign: Gtk.Align.CENTER,
                     sensitive: index > 0,
                 });
@@ -352,7 +637,7 @@ export default class TinyResourceMonitorPreferences extends ExtensionPreferences
 
                 const downButton = new Gtk.Button({
                     icon_name: 'go-down-symbolic',
-                    tooltip_text: 'Niższy priorytet',
+                    tooltip_text: 'Lower priority',
                     valign: Gtk.Align.CENTER,
                     sensitive: index < priority.length - 1,
                 });
@@ -375,9 +660,6 @@ export default class TinyResourceMonitorPreferences extends ExtensionPreferences
         const refresh = () => {
             detected = detectPhysicalInterfaces();
             priority = mergePriority(settings.get_strv('interface-priority'), detected);
-
-            // Persist the detected cards on first open and append newly added
-            // hardware later, without reordering the user's existing choices.
             savePriority();
             render();
         };
@@ -399,26 +681,26 @@ export default class TinyResourceMonitorPreferences extends ExtensionPreferences
         const currentVersionName = this.metadata['version-name'] ?? String(currentVersion);
 
         const versionGroup = new Adw.PreferencesGroup({
-            title: 'Aktualizacje',
-            description: 'Sprawdzenie odbywa się dopiero po kliknięciu. Instalacja wymaga osobnego kliknięcia Update.',
+            title: 'Updates',
+            description: 'Nothing is downloaded until you click Check for updates. Installing a package requires a separate Update click.',
         });
         page.add(versionGroup);
 
         const currentRow = new Adw.ActionRow({
-            title: 'Zainstalowana wersja',
+            title: 'Installed version',
             subtitle: currentVersionName,
         });
         versionGroup.add(currentRow);
 
         const latestRow = new Adw.ActionRow({
-            title: 'Najnowsza wersja',
-            subtitle: 'Nie sprawdzono',
+            title: 'Latest version',
+            subtitle: 'Not checked',
         });
         versionGroup.add(latestRow);
 
         const statusRow = new Adw.ActionRow({
             title: 'Status',
-            subtitle: 'Kliknij „Check for updates”.',
+            subtitle: 'Click “Check for updates”.',
         });
         versionGroup.add(statusRow);
 
@@ -430,13 +712,13 @@ export default class TinyResourceMonitorPreferences extends ExtensionPreferences
         statusRow.add_suffix(checkButton);
 
         const sourceGroup = new Adw.PreferencesGroup({
-            title: 'Źródło aktualizacji',
-            description: 'W release z GitHuba workflow ustawia ten adres automatycznie. Przy lokalnej paczce możesz wkleić adres do update.json ręcznie.',
+            title: 'Update source',
+            description: 'GitHub Actions fills this address automatically in release bundles. For a local build, paste the HTTPS URL of update.json here.',
         });
         page.add(sourceGroup);
 
         const sourceRow = new Adw.EntryRow({
-            title: 'Adres update.json (HTTPS)',
+            title: 'update.json URL (HTTPS)',
             text: settings.get_string('update-manifest-url'),
         });
         sourceGroup.add(sourceRow);
@@ -448,7 +730,7 @@ export default class TinyResourceMonitorPreferences extends ExtensionPreferences
         );
 
         const changelogGroup = new Adw.PreferencesGroup({
-            title: 'Co nowego',
+            title: 'What’s new',
             visible: false,
         });
         page.add(changelogGroup);
@@ -460,8 +742,8 @@ export default class TinyResourceMonitorPreferences extends ExtensionPreferences
         page.add(installGroup);
 
         const installRow = new Adw.ActionRow({
-            title: 'Nowa wersja jest gotowa do instalacji',
-            subtitle: 'Paczka zostanie pobrana i sprawdzona SHA-256.',
+            title: 'A new version is ready to install',
+            subtitle: 'The ZIP will be downloaded and verified with SHA-256 first.',
         });
         installGroup.add(installRow);
 
@@ -513,7 +795,7 @@ export default class TinyResourceMonitorPreferences extends ExtensionPreferences
             availableManifest = null;
             installGroup.visible = false;
             clearChangelog();
-            latestRow.subtitle = 'Nie udało się sprawdzić';
+            latestRow.subtitle = 'Check failed';
             statusRow.subtitle = error instanceof Error ? error.message : String(error);
         };
 
@@ -523,7 +805,7 @@ export default class TinyResourceMonitorPreferences extends ExtensionPreferences
 
             const manifestUrl = settings.get_string('update-manifest-url').trim();
             if (!manifestUrl) {
-                showError(new Error('Brak adresu update.json. Ustaw źródło aktualizacji poniżej.'));
+                showError(new Error('No update.json URL is configured. Set the update source below.'));
                 return;
             }
 
@@ -531,8 +813,8 @@ export default class TinyResourceMonitorPreferences extends ExtensionPreferences
             availableManifest = null;
             installGroup.visible = false;
             clearChangelog();
-            latestRow.subtitle = 'Sprawdzanie…';
-            statusRow.subtitle = 'Łączenie ze źródłem aktualizacji…';
+            latestRow.subtitle = 'Checking…';
+            statusRow.subtitle = 'Connecting to the update source…';
 
             try {
                 const data = await fetchBytes(session, manifestUrl, MAX_MANIFEST_BYTES);
@@ -544,14 +826,14 @@ export default class TinyResourceMonitorPreferences extends ExtensionPreferences
 
                 if (manifest.version > currentVersion) {
                     availableManifest = manifest;
-                    statusRow.subtitle = `Dostępna jest nowa wersja ${manifest.versionName}.`;
+                    statusRow.subtitle = `New version ${manifest.versionName} is available.`;
                     installRow.title = `New version ${manifest.versionName}`;
                     installGroup.visible = true;
                 } else if (manifest.version === currentVersion) {
-                    statusRow.subtitle = 'Masz najnowszą wersję.';
+                    statusRow.subtitle = 'You are up to date.';
                     installGroup.visible = false;
                 } else {
-                    statusRow.subtitle = `Źródło oferuje starszą wersję (${manifest.versionName}); aktualizacja została pominięta.`;
+                    statusRow.subtitle = `The source offers an older version (${manifest.versionName}); no update was installed.`;
                     installGroup.visible = false;
                 }
             } catch (error) {
@@ -567,20 +849,20 @@ export default class TinyResourceMonitorPreferences extends ExtensionPreferences
 
             const manifest = availableManifest;
             setBusy(true);
-            statusRow.subtitle = `Pobieranie ${manifest.versionName}…`;
+            statusRow.subtitle = `Downloading ${manifest.versionName}…`;
             updateButton.label = 'Updating…';
 
             try {
                 const packageBytes = await fetchBytes(session, manifest.downloadUrl, MAX_PACKAGE_BYTES);
-                statusRow.subtitle = 'Sprawdzanie SHA-256 i instalowanie…';
+                statusRow.subtitle = 'Verifying SHA-256 and installing…';
                 await installPackage(packageBytes, manifest, this.uuid);
 
                 availableManifest = null;
                 installGroup.visible = false;
-                statusRow.subtitle = `Wersja ${manifest.versionName} została zainstalowana. Wyloguj się i zaloguj ponownie, aby GNOME Shell załadował nowy kod.`;
-                latestRow.subtitle = `${manifest.versionName} — zainstalowano`;
+                statusRow.subtitle = `Version ${manifest.versionName} was installed. Log out and log back in so GNOME Shell loads the new code.`;
+                latestRow.subtitle = `${manifest.versionName} — installed`;
             } catch (error) {
-                statusRow.subtitle = `Aktualizacja nie powiodła się: ${error instanceof Error ? error.message : String(error)}`;
+                statusRow.subtitle = `Update failed: ${error instanceof Error ? error.message : String(error)}`;
             } finally {
                 updateButton.label = 'Update';
                 setBusy(false);
@@ -605,12 +887,12 @@ export default class TinyResourceMonitorPreferences extends ExtensionPreferences
 
         const aboutGroup = new Adw.PreferencesGroup({
             title: 'Tiny Resource Monitor',
-            description: 'Lekki monitor CPU, RAM i transferu sieciowego dla górnego paska GNOME Shell.',
+            description: 'A lightweight CPU, RAM and network throughput monitor for the GNOME Shell top bar.',
         });
         page.add(aboutGroup);
 
         aboutGroup.add(new Adw.ActionRow({
-            title: 'Wersja',
+            title: 'Version',
             subtitle: this.metadata['version-name'] ?? String(this.metadata.version ?? '—'),
         }));
 
@@ -620,13 +902,13 @@ export default class TinyResourceMonitorPreferences extends ExtensionPreferences
         }));
 
         aboutGroup.add(new Adw.ActionRow({
-            title: 'Licencja',
+            title: 'License',
             subtitle: 'GPL-3.0-or-later',
         }));
 
         const updateInfoGroup = new Adw.PreferencesGroup({
-            title: 'Aktualizacje',
-            description: 'Updater pobiera wyłącznie manifest HTTPS i wskazaną przez niego paczkę ZIP. Przed instalacją sprawdza UUID, zgodność z GNOME 46 i SHA-256.',
+            title: 'Update security',
+            description: 'The updater downloads only the configured HTTPS manifest and its ZIP package. It verifies UUID, GNOME Shell 46 compatibility and SHA-256 before installation.',
         });
         page.add(updateInfoGroup);
     }

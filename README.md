@@ -1,18 +1,60 @@
 # Tiny Resource Monitor
 
-A deliberately small GNOME Shell 46 extension that shows CPU usage, RAM usage and network throughput in the top panel.
+A small, customizable GNOME Shell 46 extension that shows CPU usage, RAM usage and prioritized network throughput in the top panel.
 
-Example:
+Default example:
 
 ```text
-CPU 7% | RAM 31% | ↓ 3.7 MB/s ↑ 420.1 KB/s
+CPU 7% | RAM 31% | ↓ 3.7 MB/s | ↑ 420.1 KB/s
 ```
 
-Right-click the monitor to open one native GNOME preferences window. The window is split into three pages at the top:
+Right-click the monitor to open one native GNOME preferences window. The window contains four pages:
 
+- **Customize** — visibility, left-to-right item order, panel area and colors.
 - **Network** — detected network adapters and their priority.
 - **Update** — update source, version check, changelog and installation.
-- **About** — extension version, GNOME target and security notes.
+- **About** — extension version, GNOME target and update-security notes.
+
+## Customize
+
+### Visibility
+
+The network section has a master **Network** switch. CPU, RAM, Download and Upload can each be enabled or disabled independently.
+
+If all data items are disabled, the extension keeps a tiny `⋯` right-click target in the panel so the preferences window is still reachable.
+
+### Panel placement
+
+Choose one of GNOME Shell's panel areas:
+
+- **Left**
+- **Center**
+- **Right**
+
+Version 0.4.0 defaults to **Left**.
+
+### Display order
+
+CPU, RAM, Download and Upload are stored as an ordered list. Use the up/down controls to choose the exact left-to-right order, for example:
+
+```text
+RAM 31% | CPU 7% | ↑ 420.1 KB/s | ↓ 3.7 MB/s
+```
+
+### Colors
+
+Each semantic part can use a separate color:
+
+- CPU label (`CPU`)
+- CPU value (`7%`)
+- RAM label (`RAM`)
+- RAM value (`31%`)
+- Download arrow (`↓`)
+- Download value (`3.7 MB/s`)
+- Upload arrow (`↑`)
+- Upload value (`420.1 KB/s`)
+
+An empty color setting means **use the GNOME panel theme color**. Each color can be reset individually, and **Reset colors** resets all eight values.
 
 ## Network-card priority
 
@@ -24,11 +66,31 @@ The Network page detects hardware-backed interfaces from `/sys/class/net` and sh
 3. enx001122334455
 ```
 
-Use the up/down buttons to choose priority. At runtime the monitor checks the configured list from top to bottom and uses the first active interface. If none of the configured interfaces is active, the network section is hidden and only CPU/RAM remain visible.
+Use the up/down buttons to choose priority. At runtime the monitor checks the configured list from top to bottom and uses the first active interface. If none of the configured interfaces is active, Download/Upload disappear from the panel.
 
 Newly detected hardware is appended to the end without changing the saved order. A temporarily unplugged adapter keeps its place and is skipped until it becomes active again.
 
 Before priorities are configured for the first time, the extension falls back to the active default-route interface.
+
+## GitHub repository
+
+Project repository:
+
+```text
+https://github.com/ILoveMyProjects/ZorinTinyResourceMonitor
+```
+
+Release download URL base used by `download_url`:
+
+```text
+https://github.com/ILoveMyProjects/ZorinTinyResourceMonitor/releases/download/
+```
+
+A release asset URL therefore follows this pattern:
+
+```text
+https://github.com/ILoveMyProjects/ZorinTinyResourceMonitor/releases/download/v<VERSION>/tiny-resource-monitor@local-v<VERSION>.zip
+```
 
 ## Built-in updater
 
@@ -40,10 +102,10 @@ Expected `update.json` format:
 {
   "schema": 1,
   "uuid": "tiny-resource-monitor@local",
-  "version": 4,
-  "version_name": "0.4.0",
+  "version": 5,
+  "version_name": "0.5.0",
   "shell_versions": ["46"],
-  "download_url": "https://github.com/OWNER/REPOSITORY/releases/download/v0.4.0/tiny-resource-monitor@local-v0.4.0.zip",
+  "download_url": "https://github.com/ILoveMyProjects/ZorinTinyResourceMonitor/releases/download/v0.5.0/tiny-resource-monitor@local-v0.5.0.zip",
   "sha256": "64_HEX_CHARACTERS",
   "changelog": [
     "First change",
@@ -79,55 +141,39 @@ GitHub release bundles do not need this manual step: the included GitHub Actions
 
 ## GitHub release workflow
 
-The repository includes:
+The repository includes `.github/workflows/release.yml`.
 
-```text
-.github/workflows/release.yml
-```
+For a new release:
 
-The intended release flow is:
-
-1. Update `metadata.json`:
-   - increment integer `version`,
-   - set `version-name`, for example `0.4.0`.
-2. Update `RELEASE_NOTES.md` with the short changelog for this release.
-3. Commit and push the source.
-4. Create and push a matching tag:
+1. Increment integer `version` in `metadata.json`.
+2. Set `version-name`, for example `0.5.0`.
+3. Update `RELEASE_NOTES.md`.
+4. Commit and push the source.
+5. Create and push a matching tag:
 
 ```bash
-git tag v0.4.0
-git push origin v0.4.0
+git tag v0.5.0
+git push origin v0.5.0
 ```
 
-GitHub Actions then automatically:
+GitHub Actions then automatically checks the tag, injects the update URL, builds the extension ZIP, calculates SHA-256, generates `update.json`, creates a GitHub Release and publishes the new manifest to the default branch.
 
-- checks that the tag matches `version-name`,
-- injects the stable `update.json` URL into the release bundle,
-- builds `tiny-resource-monitor@local-vX.Y.Z.zip`,
-- calculates SHA-256,
-- generates `update.json`,
-- creates a GitHub Release and uploads the ZIP,
-- writes the new `update.json` to the repository's default branch.
+Client machines download the already-built release ZIP; they do not build or compile the extension themselves.
 
-This means client machines download the already-built release ZIP; they do not build or compile the extension themselves.
+## Runtime design
 
-The workflow needs the repository's normal GitHub Actions **contents: write** permission. If the default branch is protected against bot pushes, allow the workflow to update `update.json` or adapt that final publishing step to your branch policy.
+The panel component has no network access and launches no subprocesses. Every second it reads only the required Linux kernel/system interfaces:
 
-## Why this exists
-
-The monitor is intentionally not a full system-monitoring suite. It has no graphs, history, process list, temperatures, disk monitor or background daemon.
-
-Every second the panel component reads only Linux kernel/system interfaces:
-
-- `/proc/stat` — CPU counters
-- `/proc/meminfo` — RAM counters
-- `/proc/net/route` — IPv4 default route fallback
-- `/proc/net/ipv6_route` — IPv6 default route fallback
+- `/proc/stat` — CPU counters, only when CPU display is enabled
+- `/proc/meminfo` — RAM counters, only when RAM display is enabled
+- `/proc/net/route` and `/proc/net/ipv6_route` — default-route fallback
 - `/sys/class/net/<iface>/operstate` and `carrier` — active-interface check
 - `/sys/class/net/<iface>/statistics/rx_bytes`
 - `/sys/class/net/<iface>/statistics/tx_bytes`
 
-Preferences additionally enumerate `/sys/class/net` to discover physical network adapters. Network access exists only in `prefs.js` for the explicitly requested update check/download.
+Network counters are not read when the Network master switch is off or both Download and Upload are disabled.
+
+Preferences enumerate `/sys/class/net` to discover physical adapters. Internet access exists only in `prefs.js` and only for an explicitly requested update check/download.
 
 ## Compatibility
 
@@ -135,8 +181,6 @@ This release intentionally targets:
 
 - GNOME Shell **46**
 - Linux
-
-It was designed for GNOME 46 systems such as Zorin OS 18. Other GNOME Shell versions are not declared supported until tested.
 
 ## Install from source
 
@@ -190,20 +234,6 @@ The publishable extension bundle is placed in `dist/`. On GNOME 44+ settings sch
 gnome-extensions info tiny-resource-monitor@local
 journalctl --user -b -f /usr/bin/gnome-shell
 ```
-
-## Design notes
-
-- One panel label.
-- One GLib timer, once per second.
-- No subprocesses or background daemon in the panel component.
-- Native GNOME preferences (`prefs.js`) with GSettings.
-- Right-click opens the same preferences window with Network / Update / About pages.
-- Update network traffic is user initiated and asynchronous.
-- CPU is calculated from deltas of `/proc/stat` counters.
-- RAM uses `MemTotal - MemAvailable`.
-- Network speed uses byte-counter deltas divided by monotonic elapsed time.
-- The interface name is omitted from the compact top-bar text.
-- The timer is removed and the panel object is safely destroyed in `disable()`.
 
 ## License
 
