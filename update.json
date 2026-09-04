@@ -1,21 +1,22 @@
 {
   "schema": 1,
   "uuid": "tiny-resource-monitor@local",
-  "version": 5,
-  "version_name": "0.4.1",
+  "version": 6,
+  "version_name": "0.5.0",
   "shell_versions": [
     "46"
   ],
-  "download_url": "https://github.com/ILoveMyProjects/ZorinTinyResourceMonitor/releases/download/v0.4.1/tiny-resource-monitor@local-v0.4.1.zip",
-  "sha256": "be32b690f4b88085cb6bd3d64d01efe4476c7020d48536f0356bbfd15c2929f0",
+  "download_url": "https://github.com/ILoveMyProjects/ZorinTinyResourceMonitor/releases/download/v0.5.0/tiny-resource-monitor@local-v0.5.0.zip",
+  "sha256": "ce7521ae111aa8d1337b11a4880c8f5bfcea683e871d09f508b300970b027ccb",
   "changelog": [
-    "Added a Customize page to the existing right-click preferences window.",
-    "Added Left / Center / Right panel placement with live changes.",
-    "Added independent visibility controls for CPU, RAM, Network, Download and Upload.",
-    "Added user-defined left-to-right ordering for CPU, RAM, Download and Upload.",
-    "Added separate colors for CPU label/value, RAM label/value, download arrow/value and upload arrow/value.",
-    "Added reset-to-panel-theme color controls.",
-    "Changed the default panel location to Left.",
-    "Converted all preferences, update messages and documentation to English."
+    "Added independent top-panel placement for CPU, RAM, Download and Upload.",
+    "Added six placement slots for every item: Left near/far from Activities, Center before/after Date & Time, and Right before/after System Menu.",
+    "Kept user-defined ordering when multiple items share the same placement slot.",
+    "Changed the default layout so CPU/RAM start on the left while Download/Upload start before the System Menu on the right.",
+    "Added Dynamic / Fixed value-width modes for Download and Upload.",
+    "Fixed network value width keeps changing transfer rates from shifting nearby panel items.",
+    "Hardened per-part color rendering by applying the configured foreground directly to each Clutter text actor, including the Download arrow.",
+    "Kept the update source locked to the official ILoveMyProjects/ZorinTinyResourceMonitor repository.",
+    "Kept one-command installation with automatic persistent enablement for the next GNOME session."
   ]
 }
