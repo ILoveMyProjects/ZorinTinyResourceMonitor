@@ -26,7 +26,6 @@ jobs:
           import json
           import os
           import pathlib
-          import xml.etree.ElementTree as ET
 
           root = pathlib.Path('.')
           metadata = json.loads((root / 'metadata.json').read_text())
@@ -43,17 +42,6 @@ jobs:
               raise SystemExit(f'Unexpected UUID: {uuid!r}')
 
           repo = os.environ['GITHUB_REPOSITORY']
-          branch = os.environ['DEFAULT_BRANCH']
-          manifest_url = f'https://raw.githubusercontent.com/{repo}/{branch}/update.json'
-
-          schema_path = root / 'schemas' / 'org.gnome.shell.extensions.tiny-resource-monitor.gschema.xml'
-          tree = ET.parse(schema_path)
-          key = next((node for node in tree.getroot().iter('key')
-                      if node.attrib.get('name') == 'update-manifest-url'), None)
-          if key is None or key.find('default') is None:
-              raise SystemExit('update-manifest-url schema key is missing')
-          key.find('default').text = repr(manifest_url)
-          tree.write(schema_path, encoding='UTF-8', xml_declaration=True)
 
           pathlib.Path('/tmp/release-meta.json').write_text(json.dumps({
               'version': version,
@@ -73,8 +61,6 @@ jobs:
             metadata.json \
             schemas/org.gnome.shell.extensions.tiny-resource-monitor.gschema.xml
           echo "ZIP=$ZIP" >> "$GITHUB_ENV"
-        env:
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
       - name: Build update manifest
         shell: bash
